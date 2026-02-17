@@ -3,3 +3,4 @@ requests
 openai
 beautifulsoup4
 pypdf
+streamlit-js-eval

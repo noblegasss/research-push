@@ -16,6 +16,10 @@ from xml.etree import ElementTree as ET
 import requests
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
+try:
+    from streamlit_js_eval import streamlit_js_eval
+except Exception:
+    streamlit_js_eval = None
 
 try:
     from bs4 import BeautifulSoup
@@ -160,6 +164,7 @@ FIELD_OPTIONS = [
 SETTINGS_FILE = Path(".app_settings.json")
 LAST_DIGEST_FILE = Path(".last_digest_state.json")
 LOCAL_CACHE_FILE = Path(".local_cache.json")
+BROWSER_SETTINGS_KEY = "research_digest_user_settings_v1"
 ENV_PUBLIC_MODE = os.getenv("PUBLIC_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 # On Streamlit Community Cloud, default to public-safe mode unless explicitly overridden.
@@ -1486,6 +1491,37 @@ def save_local_cache(data: dict[str, Any]) -> None:
         pass
 
 
+def load_browser_settings(defaults: dict[str, Any]) -> dict[str, Any]:
+    if streamlit_js_eval is None:
+        return {}
+    try:
+        raw = streamlit_js_eval(
+            js_expressions=f"localStorage.getItem('{BROWSER_SETTINGS_KEY}')",
+            key="browser_settings_get",
+            want_output=True,
+        )
+        if not raw or not isinstance(raw, str):
+            return {}
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            return {}
+        allowed = set(defaults.keys())
+        return {k: v for k, v in parsed.items() if k in allowed}
+    except Exception:
+        return {}
+
+
+def save_browser_settings(data: dict[str, Any]) -> None:
+    if streamlit_js_eval is None:
+        return
+    try:
+        payload = json.dumps(data, ensure_ascii=False)
+        js = f"localStorage.setItem('{BROWSER_SETTINGS_KEY}', {json.dumps(payload)});"
+        streamlit_js_eval(js_expressions=js, key="browser_settings_set", want_output=False)
+    except Exception:
+        return
+
+
 def fallback_feed_summary(p: Paper, sc: dict[str, int], lang: str = "zh") -> str:
     if p.abstract:
         abs_text = abstract_snippet(p.abstract, max_chars=180, lang=lang)
@@ -2101,6 +2137,31 @@ def get_backend_openai_api_key() -> str:
     return (key or os.getenv("OPENAI_API_KEY", "")).strip()
 
 
+def get_backend_smtp_config() -> tuple[str, int, str, str]:
+    host = ""
+    port = 587
+    user = ""
+    password = ""
+    if not PUBLIC_MODE:
+        try:
+            host = str(st.secrets.get("SMTP_HOST", "") or "")
+            port = int(st.secrets.get("SMTP_PORT", 587) or 587)
+            user = str(st.secrets.get("SMTP_USER", "") or "")
+            password = str(st.secrets.get("SMTP_PASSWORD", "") or "")
+        except StreamlitSecretNotFoundError:
+            pass
+        except Exception:
+            pass
+    host = host or os.getenv("SMTP_HOST", "")
+    try:
+        port = int(os.getenv("SMTP_PORT", str(port)) or port)
+    except Exception:
+        port = 587
+    user = user or os.getenv("SMTP_USER", "")
+    password = password or os.getenv("SMTP_PASSWORD", "")
+    return host.strip(), int(port), user.strip(), password.strip()
+
+
 def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only: bool) -> tuple[list[Paper], dict[str, int]]:
     kws = prefs.get("keywords", [])
     fields = prefs.get("fields", [])
@@ -2266,10 +2327,6 @@ def main() -> None:
         "enable_webhook_push": False,
         "webhook_url": "",
         "email_to": "",
-        "smtp_host": "smtp.gmail.com",
-        "smtp_port": 587,
-        "smtp_user": "",
-        "smtp_password": "",
         "auto_send_email": False,
         "use_api": False,
         "api_model": "gpt-4.1-mini",
@@ -2280,7 +2337,11 @@ def main() -> None:
         "auto_refresh_on_load": False,
     }
     if "saved_settings" not in st.session_state:
-        st.session_state.saved_settings = load_saved_settings(default_settings)
+        merged = load_saved_settings(default_settings)
+        browser_override = load_browser_settings(default_settings)
+        if browser_override:
+            merged.update(browser_override)
+        st.session_state.saved_settings = merged
     if "session_openai_api_key" not in st.session_state:
         st.session_state.session_openai_api_key = ""
     if "local_cache" not in st.session_state:
@@ -2381,11 +2442,8 @@ def main() -> None:
             enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=bool(cur.get("enable_webhook_push", False)))
             webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), cur.get("webhook_url", ""), disabled=not enable_webhook_push)
             email_to = st.text_input(L(ui_lang, "收件邮箱", "Email To"), cur.get("email_to", ""))
-            smtp_host = st.text_input(L(ui_lang, "SMTP 主机", "SMTP Host"), cur.get("smtp_host", "smtp.gmail.com"))
-            smtp_port = st.number_input(L(ui_lang, "SMTP 端口", "SMTP Port"), min_value=1, max_value=65535, value=int(cur.get("smtp_port", 587)), step=1)
-            smtp_user = st.text_input(L(ui_lang, "SMTP 账号", "SMTP User"), cur.get("smtp_user", ""))
-            smtp_password = st.text_input(L(ui_lang, "SMTP 密码 / 应用密码", "SMTP Password / App Password"), cur.get("smtp_password", ""), type="password")
             auto_send_email = st.toggle(L(ui_lang, "自动发送邮件", "Auto send email"), value=bool(cur.get("auto_send_email", False)))
+            st.caption(L(ui_lang, "邮箱发送由后台 SMTP 配置统一管理。", "Email delivery uses backend SMTP configuration."))
             use_api = st.toggle(L(ui_lang, "启用 ChatGPT API", "Use ChatGPT API"), value=bool(cur.get("use_api", False)))
             session_api_key = st.text_input(
                 L(ui_lang, "会话 API Key", "Session API Key"),
@@ -2435,10 +2493,6 @@ def main() -> None:
                     "enable_webhook_push": bool(enable_webhook_push and bool(webhook_url_final)),
                     "webhook_url": webhook_url_final,
                     "email_to": email_to,
-                    "smtp_host": smtp_host,
-                    "smtp_port": int(smtp_port),
-                    "smtp_user": smtp_user,
-                    "smtp_password": smtp_password,
                     "auto_send_email": auto_send_email,
                     "use_api": use_api,
                     "api_model": api_model,
@@ -2452,6 +2506,7 @@ def main() -> None:
                 if ok:
                     st.session_state.session_openai_api_key = session_api_key.strip()
                     st.session_state.saved_settings = new_settings
+                    save_browser_settings(new_settings)
                     st.success(msg)
                     st.rerun()
                 else:
@@ -2516,7 +2571,11 @@ def main() -> None:
     if open_settings:
         # Reload persisted settings to avoid accidental empty state from session-only drift.
         if PERSIST_TO_DISK:
-            st.session_state.saved_settings = load_saved_settings(default_settings)
+            merged = load_saved_settings(default_settings)
+            browser_override = load_browser_settings(default_settings)
+            if browser_override:
+                merged.update(browser_override)
+            st.session_state.saved_settings = merged
         settings_modal()
     if open_guide:
         guide_modal()
@@ -2542,10 +2601,8 @@ def main() -> None:
     proxy_prefix = s.get("proxy_prefix", "")
     webhook_url = s.get("webhook_url", "")
     email_to = s.get("email_to", "")
-    smtp_host = s.get("smtp_host", "smtp.gmail.com")
-    smtp_port = int(s.get("smtp_port", 587))
-    smtp_user = s.get("smtp_user", "")
-    smtp_password = s.get("smtp_password", "")
+    smtp_host, smtp_port, smtp_user, smtp_password = get_backend_smtp_config()
+    smtp_ready = all([smtp_host, smtp_user, smtp_password])
     auto_send_email = bool(s.get("auto_send_email", False))
     use_api = bool(s.get("use_api", False))
     api_model = s.get("api_model", "gpt-4.1-mini")
@@ -2842,7 +2899,7 @@ def main() -> None:
         with action_col2:
             send_clicked = st.button(
                 L(lang, "发送到邮箱", "Send Email"),
-                disabled=bool(st.session_state.get("is_generating", False)),
+                disabled=bool(st.session_state.get("is_generating", False)) or (not smtp_ready),
             )
             if send_clicked:
                 ok, msg = send_email_digest(
@@ -2859,12 +2916,14 @@ def main() -> None:
                     st.success(msg)
                 else:
                     st.error(msg)
+        if not smtp_ready:
+            st.caption(L(lang, "后台未配置 SMTP，邮箱发送暂不可用。", "Backend SMTP is not configured, so email delivery is unavailable."))
         if not enable_webhook_push:
             st.caption(L(lang, "Webhook 未启用，可在设置中开启。", "Webhook is disabled. Enable it in Settings."))
         if auto_send_email:
             if st.session_state.get("last_auto_email_sig", "") == digest_sig:
                 pass
-            elif all([smtp_host.strip(), smtp_user.strip(), smtp_password.strip(), email_to.strip()]):
+            elif smtp_ready and email_to.strip():
                 ok, msg = send_email_digest(
                     smtp_host=smtp_host,
                     smtp_port=int(smtp_port),
@@ -2881,7 +2940,7 @@ def main() -> None:
                 else:
                     st.error(msg)
             else:
-                st.warning(L(lang, "自动发邮件已开启，但 SMTP 配置未完整填写。", "Auto email is enabled, but SMTP settings are incomplete."))
+                st.warning(L(lang, "自动发邮件已开启，但收件邮箱或后台 SMTP 配置不完整。", "Auto email is enabled, but recipient email or backend SMTP config is incomplete."))
 
         tab_today, tab_worth, tab_insights = st.tabs(
             [L(lang, "今日Feed", "Today Feed"), L(lang, "值得读", "Worth Reading"), L(lang, "趋势洞察", "Insights")]
