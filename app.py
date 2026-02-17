@@ -164,7 +164,7 @@ FIELD_OPTIONS = [
 SETTINGS_FILE = Path(".app_settings.json")
 LAST_DIGEST_FILE = Path(".last_digest_state.json")
 LOCAL_CACHE_FILE = Path(".local_cache.json")
-BROWSER_SETTINGS_KEY = "research_digest_user_settings_v1"
+BROWSER_SETTINGS_KEY = "research_digest_user_settings_v2"
 ENV_PUBLIC_MODE = os.getenv("PUBLIC_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 # On Streamlit Community Cloud, default to public-safe mode unless explicitly overridden.
@@ -1598,6 +1598,19 @@ def save_browser_settings(data: dict[str, Any]) -> None:
         return
 
 
+def clear_browser_settings() -> None:
+    if streamlit_js_eval is None:
+        return
+    try:
+        streamlit_js_eval(
+            js_expressions=f"localStorage.removeItem('{BROWSER_SETTINGS_KEY}')",
+            key="browser_settings_clear",
+            want_output=False,
+        )
+    except Exception:
+        return
+
+
 def fallback_feed_summary(p: Paper, sc: dict[str, int], lang: str = "zh") -> str:
     if p.abstract:
         abs_text = abstract_snippet(p.abstract, max_chars=180, lang=lang)
@@ -2200,6 +2213,35 @@ def render_cards(
         render_one_card(c, i, section_title, proxy_prefix, compact=compact, show_ai_summary=show_ai_summary)
 
 
+def render_cards_grouped(
+    section_title: str,
+    cards: list[dict[str, Any]],
+    proxy_prefix: str,
+    layout_mode: str,
+    lang: str = "zh",
+    show_ai_summary: bool = True,
+) -> None:
+    if not cards:
+        st.info(L(lang, "该分区暂无论文。", "No papers in this section."))
+        return
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for c in cards:
+        ptype = paper_type_label(c.get("paper_type", "Research Article"), lang)
+        groups.setdefault(ptype, []).append(c)
+    # Show larger groups first.
+    ordered = sorted(groups.items(), key=lambda kv: len(kv[1]), reverse=True)
+    for gname, gcards in ordered:
+        with st.expander(f"{gname} ({len(gcards)})", expanded=True):
+            render_cards(
+                section_title=section_title,
+                cards=gcards,
+                proxy_prefix=proxy_prefix,
+                layout_mode=layout_mode,
+                lang=lang,
+                show_ai_summary=show_ai_summary,
+            )
+
+
 def parse_csv(text: str) -> list[str]:
     return [x.strip() for x in text.split(",") if x.strip()]
 
@@ -2641,6 +2683,11 @@ def main() -> None:
             mime="application/json",
             disabled=busy,
         )
+        if st.button(L(ui_lang, "清空本地设置缓存", "Clear Local Settings Cache"), disabled=busy):
+            clear_browser_settings()
+            st.session_state.saved_settings = default_settings.copy()
+            st.success(L(ui_lang, "已清空本地缓存并恢复默认设置。", "Local cache cleared and defaults restored."))
+            st.rerun()
 
     @st.dialog(L(st.session_state.saved_settings.get("language", "zh"), "使用说明", "How to Use"), width="large")
     def guide_modal() -> None:
@@ -2648,16 +2695,46 @@ def main() -> None:
         st.markdown(
             L(
                 glang,
-                "1. 点左上角 ⚙ 设置期刊、关键词与推送选项。\n"
-                "2. 点“生成今日Digest”获取今日论文。\n"
-                "3. 在「今日Feed / 值得读 / 趋势洞察」三个标签里阅读。\n"
-                "4. 需要外发时，使用“推送到 Webhook”或“发送到邮箱”。\n"
-                "5. 会话模式下 API Key 仅会话有效，不会保存到服务器。",
+                "【快速开始】\n"
+                "1. 点 ⚙ 设置期刊、关键词和推送方式。\n"
+                "2. 点“生成今日Digest”抓取并生成摘要。\n"
+                "3. 在「今日Feed / 值得读 / 趋势洞察」查看结果。\n"
+                "\n"
+                "【推送到 Slack】\n"
+                "1. 在 Slack 创建 Incoming Webhook（hooks.slack.com/services/...）。\n"
+                "2. 在设置里开启“启用 Webhook 推送”，填入 Webhook URL 并保存。\n"
+                "3. 生成 Digest 后，点击“推送到 Webhook”。\n"
+                "\n"
+                "【Slack 常见问题】\n"
+                "- URL 为空：请先在设置保存 Webhook URL。\n"
+                "- 推送无消息：检查 URL 是否有效、频道权限是否允许机器人发言。\n"
+                "- 值得读为空：需开启 ChatGPT API 并填写会话 API Key。\n"
+                "\n"
+                "【邮件说明】\n"
+                "- 前端只需要填收件邮箱；SMTP 由后台配置。\n"
+                "\n"
+                "【隐私说明】\n"
+                "- 会话模式下 API Key 仅会话有效，不会保存到服务器。",
+                "[Quick Start]\n"
                 "1. Click ⚙ to set journals, keywords, and delivery options.\n"
                 "2. Click 'Generate Today's Digest'.\n"
-                "3. Read in the three tabs: Today Feed / Worth Reading / Insights.\n"
-                "4. Use 'Push to Webhook' or 'Send Email' for delivery.\n"
-                "5. In session mode, API key is session-only and never persisted on server.",
+                "3. Read results in Today Feed / Worth Reading / Insights.\n"
+                "\n"
+                "[Push to Slack]\n"
+                "1. Create a Slack Incoming Webhook (hooks.slack.com/services/...).\n"
+                "2. Enable 'Webhook Push' in Settings, paste the Webhook URL, and save.\n"
+                "3. After digest generation, click 'Push to Webhook'.\n"
+                "\n"
+                "[Slack Troubleshooting]\n"
+                "- Empty URL: save a valid Webhook URL in Settings first.\n"
+                "- No message delivered: verify webhook validity and channel bot permissions.\n"
+                "- Empty Worth Reading: enable ChatGPT API and set a session API key.\n"
+                "\n"
+                "[Email]\n"
+                "- Frontend only needs recipient email; SMTP is configured on backend.\n"
+                "\n"
+                "[Privacy]\n"
+                "- In session mode, API key is session-only and never persisted on server.",
             ).replace("\n", "  \n")
         )
         if st.button(L(glang, "关闭", "Close")):
@@ -3086,7 +3163,7 @@ def main() -> None:
             st.subheader(L(lang, "今日Feed", "Today Feed"))
             with st.expander(L(lang, "今日新论文总结（可收起）", "Today's Summary (collapsible)"), expanded=True):
                 st.markdown(push_text["today_new_summary"].replace("\n", "  \n"))
-            render_cards(
+            render_cards_grouped(
                 L(lang, "今日论文流", "Today Feed Papers"),
                 today_cards,
                 proxy_prefix,
@@ -3100,7 +3177,7 @@ def main() -> None:
                 st.caption(L(lang, "Worth Reading 完全由 AI 基于论文内容分析生成。", "Worth Reading is fully generated by AI analysis of paper content."))
             with st.expander(L(lang, "Worth Reading Summary（可收起）", "Worth Reading Summary (collapsible)"), expanded=True):
                 st.markdown(push_text["worth_reading_summary"].replace("\n", "  \n"))
-            render_cards(
+            render_cards_grouped(
                 L(lang, "值得读论文", "Worth Reading Papers"),
                 worth_cards,
                 proxy_prefix,
