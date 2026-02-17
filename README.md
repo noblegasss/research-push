@@ -115,29 +115,3 @@ You can set these via Streamlit Secrets or environment variables.
    - main file: `app.py`
 3. Add secrets/env vars if needed (OpenAI/SMTP).
 4. Deploy and test.
-
-## Troubleshooting
-
-### Only one journal appears
-
-- Check run diagnostics line:
-  - `Active journals: N (...)`
-- Clear local browser settings cache in Settings and save again.
-- Regenerate digest after confirming multiple journals are active.
-
-### Worth Reading is empty
-
-- Ensure **Use ChatGPT API** is enabled.
-- Ensure Session API Key is set.
-- Retry if API timeout/rate limit occurs.
-
-### Auto email warning appears
-
-- Backend SMTP is incomplete.
-- Configure `SMTP_HOST/PORT/USER/PASSWORD`, then re-enable auto email.
-
-### Webhook push fails
-
-- Confirm URL is valid and saved.
-- Confirm Slack webhook/channel permissions.
-- Check HTTP status and response in app notification.
