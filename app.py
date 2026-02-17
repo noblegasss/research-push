@@ -2054,14 +2054,6 @@ def render_one_card(
         """,
         unsafe_allow_html=True,
     )
-    if not PERSIST_TO_DISK:
-        st.caption(
-            L(
-                current_lang,
-                "会话模式：不加载/保存服务器端个人配置；API Key 仅会话有效。",
-                "Session mode: no server-side personal config persistence; API key is session-only.",
-            )
-        )
     url = apply_proxy(c.get("link", ""), proxy_prefix)
     if url:
         st.link_button(L(lang, "查看论文", "Open Paper"), url)
