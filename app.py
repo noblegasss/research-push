@@ -2569,13 +2569,7 @@ def main() -> None:
             disabled=bool(st.session_state.get("is_generating", False)),
         )
     if open_settings:
-        # Reload persisted settings to avoid accidental empty state from session-only drift.
-        if PERSIST_TO_DISK:
-            merged = load_saved_settings(default_settings)
-            browser_override = load_browser_settings(default_settings)
-            if browser_override:
-                merged.update(browser_override)
-            st.session_state.saved_settings = merged
+        # Keep current in-session settings to avoid dialog auto-close from extra reruns.
         settings_modal()
     if open_guide:
         guide_modal()
