@@ -164,6 +164,10 @@ ENV_PUBLIC_MODE = os.getenv("PUBLIC_MODE", "0").strip().lower() in {"1", "true",
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 # On Streamlit Community Cloud, default to public-safe mode unless explicitly overridden.
 PUBLIC_MODE = ENV_PUBLIC_MODE or IS_STREAMLIT_CLOUD
+# Server-side file persistence is disabled by default to avoid cross-user leakage.
+# Set SERVER_PERSISTENCE=1 only for trusted single-user/self-host deployments.
+SERVER_PERSISTENCE = os.getenv("SERVER_PERSISTENCE", "0").strip().lower() in {"1", "true", "yes", "on"}
+PERSIST_TO_DISK = (not PUBLIC_MODE) and SERVER_PERSISTENCE
 
 
 @dataclass
@@ -803,8 +807,13 @@ def inject_styles() -> None:
         }
         .block-container {
           max-width: 1220px;
-          padding-top: 0.8rem;
+          padding-top: 3.2rem;
           padding-bottom: 2.2rem;
+        }
+        @media (max-width: 900px) {
+          .block-container {
+            padding-top: 3.8rem;
+          }
         }
         .topbar {
           border: 1px solid #d5e0ec;
@@ -908,6 +917,10 @@ def inject_styles() -> None:
           border-radius: 10px;
           padding: 9px 15px;
           font-weight: 700;
+          color: #16324a !important;
+        }
+        .stTabs [data-baseweb="tab"]:not([aria-selected="true"]) {
+          color: #244760 !important;
         }
         .stTabs [aria-selected="true"] {
           background: #ffffff !important;
@@ -920,6 +933,9 @@ def inject_styles() -> None:
           border-radius: 12px !important;
           background: #ffffff;
           box-shadow: 0 4px 14px rgba(16, 35, 54, 0.06);
+        }
+        .stExpander summary, .stExpander summary * {
+          color: #16324a !important;
         }
         .stButton > button {
           border-radius: 10px;
@@ -1389,7 +1405,7 @@ def paper_type_label(paper_type: str, lang: str = "zh") -> str:
 
 
 def load_saved_settings(defaults: dict[str, Any]) -> dict[str, Any]:
-    if PUBLIC_MODE:
+    if not PERSIST_TO_DISK:
         return defaults
     if not SETTINGS_FILE.exists():
         return defaults
@@ -1404,8 +1420,8 @@ def load_saved_settings(defaults: dict[str, Any]) -> dict[str, Any]:
 
 def save_settings(data: dict[str, Any]) -> tuple[bool, str]:
     lang = data.get("language", "zh")
-    if PUBLIC_MODE:
-        return True, L(lang, "Public 模式：设置仅保留在当前会话。", "Public mode: settings are session-only.")
+    if not PERSIST_TO_DISK:
+        return True, L(lang, "会话模式：设置仅保留在当前会话。", "Session mode: settings are session-only.")
     try:
         SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return True, L(lang, f"设置已保存到 {SETTINGS_FILE}", f"Settings saved to {SETTINGS_FILE}")
@@ -1414,7 +1430,7 @@ def save_settings(data: dict[str, Any]) -> tuple[bool, str]:
 
 
 def load_last_digest_state() -> dict[str, Any]:
-    if PUBLIC_MODE:
+    if not PERSIST_TO_DISK:
         return {}
     if not LAST_DIGEST_FILE.exists():
         return {}
@@ -1426,7 +1442,7 @@ def load_last_digest_state() -> dict[str, Any]:
 
 
 def save_last_digest_state(data: dict[str, Any]) -> None:
-    if PUBLIC_MODE:
+    if not PERSIST_TO_DISK:
         return
     try:
         LAST_DIGEST_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1435,7 +1451,7 @@ def save_last_digest_state(data: dict[str, Any]) -> None:
 
 
 def load_local_cache() -> dict[str, Any]:
-    if PUBLIC_MODE:
+    if not PERSIST_TO_DISK:
         return {"abstract_by_id": {}, "llm_summary_cache": {}}
     if not LOCAL_CACHE_FILE.exists():
         return {"abstract_by_id": {}, "llm_summary_cache": {}}
@@ -1452,7 +1468,7 @@ def load_local_cache() -> dict[str, Any]:
 
 
 def save_local_cache(data: dict[str, Any]) -> None:
-    if PUBLIC_MODE:
+    if not PERSIST_TO_DISK:
         return
     try:
         out = dict(data)
@@ -2038,8 +2054,14 @@ def render_one_card(
         """,
         unsafe_allow_html=True,
     )
-    if PUBLIC_MODE:
-        st.caption(L(current_lang, "Public 模式：不加载/保存个人配置；API Key 仅会话有效。", "Public mode: no personal config persisted; API key is session-only."))
+    if not PERSIST_TO_DISK:
+        st.caption(
+            L(
+                current_lang,
+                "会话模式：不加载/保存服务器端个人配置；API Key 仅会话有效。",
+                "Session mode: no server-side personal config persistence; API key is session-only.",
+            )
+        )
     url = apply_proxy(c.get("link", ""), proxy_prefix)
     if url:
         st.link_button(L(lang, "查看论文", "Open Paper"), url)
@@ -2257,13 +2279,13 @@ def main() -> None:
     if "is_generating" not in st.session_state:
         st.session_state.is_generating = False
     if "last_digest" not in st.session_state:
-        restored = load_last_digest_state()
-        st.session_state.last_digest = restored.get("digest")
-        st.session_state.last_push_text = restored.get("push_text")
-        st.session_state.last_today_cards = restored.get("today_cards")
-        st.session_state.last_worth_cards = restored.get("worth_cards")
-        st.session_state.last_fetch_note = restored.get("fetch_note", "")
-        st.session_state.last_fetch_diag = restored.get("fetch_diag", {})
+        # Session-only result state: do not restore server-shared last digest.
+        st.session_state.last_digest = None
+        st.session_state.last_push_text = None
+        st.session_state.last_today_cards = None
+        st.session_state.last_worth_cards = None
+        st.session_state.last_fetch_note = ""
+        st.session_state.last_fetch_diag = {}
     if "last_push_text" not in st.session_state:
         st.session_state.last_push_text = None
     if "last_today_cards" not in st.session_state:
@@ -2437,29 +2459,42 @@ def main() -> None:
                 "2. 点“生成今日Digest”获取今日论文。\n"
                 "3. 在「今日Feed / 值得读 / 趋势洞察」三个标签里阅读。\n"
                 "4. 需要外发时，使用“推送到 Webhook”或“发送到邮箱”。\n"
-                "5. Public 模式下 API Key 仅会话有效，不会保存到服务器。",
+                "5. 会话模式下 API Key 仅会话有效，不会保存到服务器。",
                 "1. Click ⚙ to set journals, keywords, and delivery options.\n"
                 "2. Click 'Generate Today's Digest'.\n"
                 "3. Read in the three tabs: Today Feed / Worth Reading / Insights.\n"
                 "4. Use 'Push to Webhook' or 'Send Email' for delivery.\n"
-                "5. In Public mode, API key is session-only and never persisted.",
+                "5. In session mode, API key is session-only and never persisted on server.",
             ).replace("\n", "  \n")
         )
         if st.button(L(glang, "关闭", "Close")):
             st.rerun()
 
-    topbar_l, topbar_spacer, topbar_r1, topbar_r2 = st.columns([3, 9, 1, 1])
-    with topbar_l:
+    top_left, top_spacer, top_right_l, top_right_r = st.columns([4, 6, 1.2, 1.2], gap="small")
+    with top_left:
         run = st.button(
             L(s.get("language", "zh"), "生成今日Digest", "Generate Today's Digest"),
             type="primary",
             key="generate_main_btn",
+            use_container_width=True,
             disabled=bool(st.session_state.get("is_generating", False)),
         )
-    with topbar_r1:
-        open_guide = st.button("ⓘ", help=L(s.get("language", "zh"), "使用说明", "Guide"), key="guide_btn", disabled=bool(st.session_state.get("is_generating", False)))
-    with topbar_r2:
-        open_settings = st.button("⚙", help=L(s.get("language", "zh"), "设置", "Settings"), key="settings_toggle_btn", disabled=bool(st.session_state.get("is_generating", False)))
+    with top_right_l:
+        open_guide = st.button(
+            "ⓘ",
+            help=L(s.get("language", "zh"), "使用说明", "Guide"),
+            key="guide_btn",
+            use_container_width=True,
+            disabled=bool(st.session_state.get("is_generating", False)),
+        )
+    with top_right_r:
+        open_settings = st.button(
+            "⚙",
+            help=L(s.get("language", "zh"), "设置", "Settings"),
+            key="settings_toggle_btn",
+            use_container_width=True,
+            disabled=bool(st.session_state.get("is_generating", False)),
+        )
     if open_settings:
         # Reload persisted settings to avoid accidental empty state from session-only drift.
         if not PUBLIC_MODE:
@@ -2510,11 +2545,11 @@ def main() -> None:
         st.warning(
             L(
                 lang,
-                "Public 模式请在设置中填写会话 API Key；未填写时 AI 功能不可用。"
-                if PUBLIC_MODE
+                "请在设置中填写会话 API Key；未填写时 AI 功能不可用。"
+                if not PERSIST_TO_DISK
                 else "未检测到 OPENAI_API_KEY，AI相关功能将回退到非AI模式。",
-                "In Public mode, set a Session API Key in Settings; without it AI features are unavailable."
-                if PUBLIC_MODE
+                "Set a Session API Key in Settings; without it AI features are unavailable."
+                if not PERSIST_TO_DISK
                 else "OPENAI_API_KEY not found. AI features will fall back to non-AI mode.",
             )
         )
@@ -2688,10 +2723,10 @@ def main() -> None:
                     L(
                         lang,
                         "Worth Reading 需要会话 API Key 才能由 AI 生成。"
-                        if PUBLIC_MODE
+                        if not PERSIST_TO_DISK
                         else "Worth Reading 需要 OPENAI_API_KEY 才能由 AI 生成。",
                         "Worth Reading requires a Session API Key to be generated by AI."
-                        if PUBLIC_MODE
+                        if not PERSIST_TO_DISK
                         else "Worth Reading requires OPENAI_API_KEY to be generated by AI.",
                     )
                 )
@@ -2705,17 +2740,6 @@ def main() -> None:
             st.session_state.last_worth_cards = worth_cards
             st.session_state.last_fetch_note = fetch_note
             st.session_state.last_fetch_diag = fetch_diag
-            save_last_digest_state(
-                {
-                    "digest": digest,
-                    "push_text": push_text,
-                    "today_cards": today_cards,
-                    "worth_cards": worth_cards,
-                    "fetch_note": fetch_note,
-                    "fetch_diag": fetch_diag,
-                    "saved_at": now_utc().isoformat(),
-                }
-            )
             if st.session_state.get("local_cache_dirty", False):
                 save_local_cache(st.session_state.get("local_cache", {}))
                 st.session_state.local_cache_dirty = False
@@ -2734,7 +2758,7 @@ def main() -> None:
         # Run details are already shown in the generation status panel to avoid duplicate messaging.
 
         header = digest["digest_header"]
-        k1, k2, k3 = st.columns(3)
+        k1, k2, k3 = st.columns([1, 1, 1], gap="small")
         k1.markdown(f"<div class='kpi'><strong>{L(lang,'覆盖范围','Coverage')}</strong><br>{header['coverage']}</div>", unsafe_allow_html=True)
         k2.markdown(
             f"<div class='kpi'><strong>{L(lang,'抓取/去重','Fetched/Deduped')}</strong><br>{header['stats']['fetched_count']} / {header['stats']['deduplicated_count']}</div>",
