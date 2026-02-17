@@ -1346,7 +1346,9 @@ def passes(p: Paper, prefs: dict[str, Any]) -> bool:
         strict=bool(prefs.get("strict_journal_only", True)),
     ):
         return False
-    if keywords and not any(k.lower() in text for k in keywords):
+    # Journal subscriptions are treated as primary scope. When journals are selected,
+    # keywords/fields become ranking signals instead of hard gates.
+    if (not journals) and keywords and not any(k.lower() in text for k in keywords):
         return False
     dt = parse_date(p.publication_date)
     if dt and dt < now_utc() - timedelta(days=int(prefs.get("date_range_days", 14))):
@@ -2358,6 +2360,24 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
         rss_results = fut_rss.result()
         pubmed_results = fut_pubmed.result()
     combined = arxiv_results + crossref_results + rss_results + pubmed_results
+
+    # Journal-only multi-select guard: if only one journal is hit, try to backfill missing journals.
+    journal_backfill = 0
+    if journal_only_mode and len(journals) > 1:
+        missing: list[str] = []
+        for j in journals:
+            has_j = any(
+                venue_matches_selected(p.venue or "", [j], strict=bool(strict_journal_only))
+                for p in combined
+            )
+            if not has_j:
+                missing.append(j)
+        for j in missing[:8]:
+            extra = fetch_crossref_by_journals([j], days=max(days, 7), strict_journal_only=False)
+            extra = [p for p in extra if venue_matches_selected(p.venue or "", [j], strict=False)]
+            if extra:
+                combined.extend(extra)
+                journal_backfill += len(extra)
     combined = enrich_missing_abstracts(combined, max_enrich=MAX_ABSTRACT_ENRICH)
     diag = {
         "arxiv": len(arxiv_results),
@@ -2365,6 +2385,7 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
         "rss": len(rss_results),
         "pubmed": len(pubmed_results),
         "total_raw": len(arxiv_results) + len(crossref_results) + len(rss_results) + len(pubmed_results),
+        "journal_backfill": journal_backfill,
         "cache_hit": 0,
     }
     fetch_cache[cache_key] = {"ts": now_ts, "papers": combined, "diag": diag}
@@ -2895,6 +2916,29 @@ def main() -> None:
                     f"Fetch breakdown: Crossref {fetch_diag.get('crossref',0)} | PubMed {fetch_diag.get('pubmed',0)} | RSS {fetch_diag.get('rss',0)} | arXiv {fetch_diag.get('arxiv',0)} | Raw {fetch_diag.get('total_raw',0)}",
                 )
             )
+            if papers:
+                venue_counts: dict[str, int] = {}
+                for p in papers:
+                    v = (p.venue or "Unknown Venue").strip() or "Unknown Venue"
+                    venue_counts[v] = venue_counts.get(v, 0) + 1
+                top_venues = ", ".join(
+                    [f"{k}:{v}" for k, v in sorted(venue_counts.items(), key=lambda kv: kv[1], reverse=True)[:8]]
+                )
+                run_status.write(
+                    L(
+                        lang,
+                        f"期刊命中分布：{top_venues}",
+                        f"Journal hit distribution: {top_venues}",
+                    )
+                )
+            if int(fetch_diag.get("journal_backfill", 0)) > 0:
+                run_status.write(
+                    L(
+                        lang,
+                        f"多期刊补抓命中：{fetch_diag.get('journal_backfill',0)}",
+                        f"Multi-journal backfill hits: {fetch_diag.get('journal_backfill',0)}",
+                    )
+                )
             if int(fetch_diag.get("cache_hit", 0)) == 1:
                 run_status.write(L(lang, "命中缓存（15分钟）", "Cache hit (15 minutes)"))
             elif int(fetch_diag.get("cache_hit", 0)) == 2:
