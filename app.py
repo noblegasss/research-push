@@ -160,7 +160,10 @@ FIELD_OPTIONS = [
 SETTINGS_FILE = Path(".app_settings.json")
 LAST_DIGEST_FILE = Path(".last_digest_state.json")
 LOCAL_CACHE_FILE = Path(".local_cache.json")
-PUBLIC_MODE = os.getenv("PUBLIC_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
+ENV_PUBLIC_MODE = os.getenv("PUBLIC_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
+IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
+# On Streamlit Community Cloud, default to public-safe mode unless explicitly overridden.
+PUBLIC_MODE = ENV_PUBLIC_MODE or IS_STREAMLIT_CLOUD
 
 
 @dataclass
@@ -1659,7 +1662,7 @@ def build_daily_push_text(digest: dict[str, Any], lang: str = "zh") -> dict[str,
     }
 
 
-def build_worth_summary_from_cards(cards: list[dict[str, Any]], lang: str = "zh") -> str:
+def build_worth_summary_from_cards(cards: list[dict[str, Any]], lang: str = "zh", show_ai_summary: bool = True) -> str:
     if not cards:
         return L(lang, "暂无 AI 推荐必读论文。", "No AI-selected must-read papers.")
     lines = []
@@ -1667,7 +1670,9 @@ def build_worth_summary_from_cards(cards: list[dict[str, Any]], lang: str = "zh"
         lines.append(f"{i}. {c['title']}")
         lines.append(L(lang, f"   期刊/日期：{c.get('venue','')} | {c.get('date','')}", f"   Venue/Date: {c.get('venue','')} | {c.get('date','')}"))
         lines.append(L(lang, f"   类型：{paper_type_label(c.get('paper_type','Research Article'), lang)}", f"   Type: {paper_type_label(c.get('paper_type','Research Article'), lang)}"))
-        lines.append(L(lang, f"   推荐理由：{c.get('ai_feed_summary','')}", f"   Why read: {c.get('ai_feed_summary','')}"))
+        reason = c.get("ai_feed_summary", "") if show_ai_summary else c.get("why_it_matters", "")
+        reason_label = L(lang, "AI推荐理由", "AI reason") if show_ai_summary else L(lang, "推荐理由", "Reason")
+        lines.append(L(lang, f"   {reason_label}：{reason}", f"   {reason_label}: {reason}"))
         lines.append(L(lang, f"   链接：{c.get('link','')}", f"   Link: {c.get('link','')}"))
         lines.append("")
     return L(lang, "值得优先阅读：\n", "Worth reading first:\n") + "\n".join(lines)
@@ -1994,21 +1999,33 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
     }
 
 
-def render_one_card(c: dict[str, Any], i: int, section_title: str, proxy_prefix: str, compact: bool) -> None:
+def render_one_card(
+    c: dict[str, Any],
+    i: int,
+    section_title: str,
+    proxy_prefix: str,
+    compact: bool,
+    show_ai_summary: bool = True,
+) -> None:
     lang = c.get("language", "zh")
     abstract_label = L(lang, "摘要", "Abstract")
     ai_label = L(lang, "AI摘要", "AI Feed Summary")
     tags = "".join([f"<span class='pill'>{t}</span>" for t in c.get("tags", [])[:6]])
+    ai_line = (
+        f"<div class=\"section-line\"><strong>{ai_label}:</strong> {c.get('ai_feed_summary', '')}</div>"
+        if show_ai_summary
+        else ""
+    )
     if compact:
         body = f"""
           <div class="section-line"><strong>{abstract_label}:</strong> {c.get("abstract_excerpt", "")}</div>
-          <div class="section-line"><strong>{ai_label}:</strong> {c.get("ai_feed_summary", "")}</div>
+          {ai_line}
           <div>{tags}</div>
         """
     else:
         body = f"""
           <div class="section-line"><strong>{abstract_label}:</strong> {c.get("abstract_excerpt", "")}</div>
-          <div class="section-line"><strong>{ai_label}:</strong> {c.get("ai_feed_summary", "")}</div>
+          {ai_line}
           <div>{tags}</div>
         """
     st.markdown(
@@ -2028,7 +2045,14 @@ def render_one_card(c: dict[str, Any], i: int, section_title: str, proxy_prefix:
         st.link_button(L(lang, "查看论文", "Open Paper"), url)
 
 
-def render_cards(section_title: str, cards: list[dict[str, Any]], proxy_prefix: str, layout_mode: str, lang: str = "zh") -> None:
+def render_cards(
+    section_title: str,
+    cards: list[dict[str, Any]],
+    proxy_prefix: str,
+    layout_mode: str,
+    lang: str = "zh",
+    show_ai_summary: bool = True,
+) -> None:
     if not cards:
         st.info(L(lang, "该分区暂无论文。", "No papers in this section."))
         return
@@ -2036,17 +2060,17 @@ def render_cards(section_title: str, cards: list[dict[str, Any]], proxy_prefix: 
         cols = st.columns(2)
         for i, c in enumerate(cards, start=1):
             with cols[(i - 1) % 2]:
-                render_one_card(c, i, section_title, proxy_prefix, compact=False)
+                render_one_card(c, i, section_title, proxy_prefix, compact=False, show_ai_summary=show_ai_summary)
         return
     if layout_mode == "board3":
         cols = st.columns(3)
         for i, c in enumerate(cards, start=1):
             with cols[(i - 1) % 3]:
-                render_one_card(c, i, section_title, proxy_prefix, compact=False)
+                render_one_card(c, i, section_title, proxy_prefix, compact=False, show_ai_summary=show_ai_summary)
         return
     compact = layout_mode == "compact"
     for i, c in enumerate(cards, start=1):
-        render_one_card(c, i, section_title, proxy_prefix, compact=compact)
+        render_one_card(c, i, section_title, proxy_prefix, compact=compact, show_ai_summary=show_ai_summary)
 
 
 def parse_csv(text: str) -> list[str]:
@@ -2054,8 +2078,11 @@ def parse_csv(text: str) -> list[str]:
 
 
 def get_backend_openai_api_key() -> str:
+    session_key = str(st.session_state.get("session_openai_api_key", "")).strip()
+    if session_key:
+        return session_key
     if PUBLIC_MODE:
-        return str(st.session_state.get("session_openai_api_key", "")).strip()
+        return ""
     try:
         key = st.secrets.get("OPENAI_API_KEY", "")
     except StreamlitSecretNotFoundError:
@@ -2327,14 +2354,16 @@ def main() -> None:
             smtp_password = st.text_input(L(ui_lang, "SMTP 密码 / 应用密码", "SMTP Password / App Password"), cur.get("smtp_password", ""), type="password")
             auto_send_email = st.toggle(L(ui_lang, "自动发送邮件", "Auto send email"), value=bool(cur.get("auto_send_email", False)))
             use_api = st.toggle(L(ui_lang, "启用 ChatGPT API", "Use ChatGPT API"), value=bool(cur.get("use_api", False)))
-            session_api_key = ""
-            if PUBLIC_MODE:
-                session_api_key = st.text_input(
-                    L(ui_lang, "会话 API Key", "Session API Key"),
-                    value=str(st.session_state.get("session_openai_api_key", "")),
-                    type="password",
-                    help=L(ui_lang, "仅当前会话有效，不会写入服务器磁盘。", "Session-only; not persisted on server disk."),
-                )
+            session_api_key = st.text_input(
+                L(ui_lang, "会话 API Key", "Session API Key"),
+                value=str(st.session_state.get("session_openai_api_key", "")),
+                type="password",
+                help=L(
+                    ui_lang,
+                    "会话有效；关闭应用后需重新填写。推荐生产环境用 Secrets。",
+                    "Session-only; you need to re-enter after restart. Use Secrets for production.",
+                ),
+            )
             api_model = st.text_input(L(ui_lang, "模型", "Model"), cur.get("api_model", "gpt-4.1-mini"), disabled=not use_api)
             deep_read_mode = st.toggle(L(ui_lang, "可访问时读取全文", "AI read full text when possible"), value=bool(cur.get("deep_read_mode", False)), disabled=not use_api)
             deep_read_limit = st.slider(L(ui_lang, "全文阅读篇数", "Full-text read count"), 1, 10, int(cur.get("deep_read_limit", 5)), 1, disabled=not use_api)
@@ -2381,8 +2410,7 @@ def main() -> None:
                 }
                 ok, msg = save_settings(new_settings)
                 if ok:
-                    if PUBLIC_MODE:
-                        st.session_state.session_openai_api_key = session_api_key.strip()
+                    st.session_state.session_openai_api_key = session_api_key.strip()
                     st.session_state.saved_settings = new_settings
                     st.success(msg)
                     st.rerun()
@@ -2667,7 +2695,10 @@ def main() -> None:
                         else "Worth Reading requires OPENAI_API_KEY to be generated by AI.",
                     )
                 )
-            push_text["worth_reading_summary"] = build_worth_summary_from_cards(worth_cards, lang=lang)
+            show_ai_summary = bool(use_api and api_key.strip())
+            push_text["worth_reading_summary"] = build_worth_summary_from_cards(
+                worth_cards, lang=lang, show_ai_summary=show_ai_summary
+            )
             st.session_state.last_digest = digest
             st.session_state.last_push_text = push_text
             st.session_state.last_today_cards = today_cards
@@ -2802,13 +2833,28 @@ def main() -> None:
             st.subheader(L(lang, "今日Feed", "Today Feed"))
             with st.expander(L(lang, "今日新论文总结（可收起）", "Today's Summary (collapsible)"), expanded=True):
                 st.markdown(push_text["today_new_summary"].replace("\n", "  \n"))
-            render_cards(L(lang, "今日论文流", "Today Feed Papers"), today_cards, proxy_prefix, layout_mode, lang=lang)
+            render_cards(
+                L(lang, "今日论文流", "Today Feed Papers"),
+                today_cards,
+                proxy_prefix,
+                layout_mode,
+                lang=lang,
+                show_ai_summary=bool(use_api and api_key.strip()),
+            )
         with tab_worth:
             st.subheader(L(lang, "值得读", "Worth Reading"))
-            st.caption(L(lang, "Worth Reading 完全由 AI 基于论文内容分析生成。", "Worth Reading is fully generated by AI analysis of paper content."))
+            if use_api and api_key.strip():
+                st.caption(L(lang, "Worth Reading 完全由 AI 基于论文内容分析生成。", "Worth Reading is fully generated by AI analysis of paper content."))
             with st.expander(L(lang, "Worth Reading Summary（可收起）", "Worth Reading Summary (collapsible)"), expanded=True):
                 st.markdown(push_text["worth_reading_summary"].replace("\n", "  \n"))
-            render_cards(L(lang, "值得读论文", "Worth Reading Papers"), worth_cards, proxy_prefix, layout_mode, lang=lang)
+            render_cards(
+                L(lang, "值得读论文", "Worth Reading Papers"),
+                worth_cards,
+                proxy_prefix,
+                layout_mode,
+                lang=lang,
+                show_ai_summary=bool(use_api and api_key.strip()),
+            )
         with tab_insights:
             st.subheader(L(lang, "趋势洞察", "Insights"))
             for idx, t in enumerate(header["trends"], start=1):
