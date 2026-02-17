@@ -380,6 +380,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
             if r.status_code != 200:
                 continue
             root = ET.fromstring(r.text)
+            # RSS 2.0
             for item in root.findall(".//item"):
                 title = (item.findtext("title", default="") or "").strip()
                 link = (item.findtext("link", default="") or "").strip()
@@ -389,6 +390,42 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                 if dt and dt < cutoff:
                     continue
                 date = dt.strftime("%Y-%m-%d") if dt else ""
+                if not title:
+                    continue
+                out.append(
+                    Paper(
+                        title=title,
+                        authors=[],
+                        venue=journal_norm.title(),
+                        publication_date=date,
+                        abstract=desc,
+                        url=link,
+                    )
+                )
+            # Atom (many publisher feeds use Atom `entry`)
+            for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry"):
+                title = (entry.findtext("{http://www.w3.org/2005/Atom}title", default="") or "").strip()
+                link = ""
+                link_node = entry.find("{http://www.w3.org/2005/Atom}link")
+                if link_node is not None:
+                    link = (link_node.attrib.get("href", "") or "").strip()
+                summary = (
+                    entry.findtext("{http://www.w3.org/2005/Atom}summary", default="")
+                    or entry.findtext("{http://www.w3.org/2005/Atom}content", default="")
+                    or ""
+                ).strip()
+                desc = clean_abstract(summary)
+                pub = (
+                    entry.findtext("{http://www.w3.org/2005/Atom}published", default="")
+                    or entry.findtext("{http://www.w3.org/2005/Atom}updated", default="")
+                    or ""
+                ).strip()
+                dt = parse_date(pub[:10]) if pub else None
+                if not dt:
+                    dt = parse_rss_datetime(pub)
+                if dt and dt < cutoff:
+                    continue
+                date = dt.strftime("%Y-%m-%d") if dt else (pub[:10] if pub else "")
                 if not title:
                     continue
                 out.append(
@@ -2373,8 +2410,10 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
             if not has_j:
                 missing.append(j)
         for j in missing[:8]:
-            extra = fetch_crossref_by_journals([j], days=max(days, 7), strict_journal_only=False)
-            extra = [p for p in extra if venue_matches_selected(p.venue or "", [j], strict=False)]
+            # Backfill must stay strict; relaxed matching causes false positives
+            # (e.g., journals containing generic words like "Nature").
+            extra = fetch_crossref_by_journals([j], days=max(days, 7), strict_journal_only=True)
+            extra = [p for p in extra if venue_matches_selected(p.venue or "", [j], strict=True)]
             if extra:
                 combined.extend(extra)
                 journal_backfill += len(extra)
@@ -2470,11 +2509,13 @@ def main() -> None:
     current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
     top_title = L(current_lang, "研究速递", "Research Digest")
     feed_title = L(current_lang, "今日论文", "Research Feed")
+    app_url = "https://research-push.streamlit.app/"
     st.markdown(
         f"""
         <div class="topbar">
           <div>
             <p class="topbar-title">{top_title}</p>
+            <p class="topbar-sub"><a href="{app_url}" target="_blank" rel="noopener noreferrer">{app_url}</a></p>
           </div>
         </div>
         <div class="hero">
@@ -2733,6 +2774,7 @@ def main() -> None:
             L(
                 glang,
                 "【快速开始】\n"
+                "访问地址：https://research-push.streamlit.app/\n"
                 "1. 点 ⚙ 设置期刊、关键词和推送方式。\n"
                 "2. 点“生成今日Digest”抓取并生成摘要。\n"
                 "3. 在「今日Feed / 值得读 / 趋势洞察」查看结果。\n"
@@ -2753,6 +2795,7 @@ def main() -> None:
                 "【隐私说明】\n"
                 "- 会话模式下 API Key 仅会话有效，不会保存到服务器。",
                 "[Quick Start]\n"
+                "App URL: https://research-push.streamlit.app/\n"
                 "1. Click ⚙ to set journals, keywords, and delivery options.\n"
                 "2. Click 'Generate Today's Digest'.\n"
                 "3. Read results in Today Feed / Worth Reading / Insights.\n"

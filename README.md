@@ -2,6 +2,8 @@
 
 A Streamlit app that discovers new papers from selected journals/topics, de-duplicates results, enriches abstracts, and generates readable daily digests with optional AI-enhanced summaries.
 
+Live app: https://research-push.streamlit.app/
+
 ## Features
 
 - Journal-first discovery with multi-select support.
