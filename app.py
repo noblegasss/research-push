@@ -2489,7 +2489,7 @@ def main() -> None:
         )
     if open_settings:
         # Reload persisted settings to avoid accidental empty state from session-only drift.
-        if not PUBLIC_MODE:
+        if PERSIST_TO_DISK:
             st.session_state.saved_settings = load_saved_settings(default_settings)
         settings_modal()
     if open_guide:
