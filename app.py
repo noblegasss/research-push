@@ -1375,7 +1375,8 @@ def passes(p: Paper, prefs: dict[str, Any]) -> bool:
     if any(t.lower() in text for t in prefs.get("exclude_keywords", [])):
         return False
     journals = prefs.get("journals", [])
-    keywords = prefs.get("keywords", []) + prefs.get("fields", [])
+    # Keep fields as discovery/ranking hints; only explicit keywords are hard filters.
+    keywords = prefs.get("keywords", [])
     if journals and not venue_matches_selected(
         p.venue or "",
         journals,
@@ -1383,7 +1384,7 @@ def passes(p: Paper, prefs: dict[str, Any]) -> bool:
     ):
         return False
     # Journal subscriptions are treated as primary scope. When journals are selected,
-    # keywords/fields become ranking signals instead of hard gates.
+    # keywords become ranking signals instead of hard gates.
     if (not journals) and keywords and not any(k.lower() in text for k in keywords):
         return False
     dt = parse_date(p.publication_date)
@@ -1644,11 +1645,11 @@ def save_browser_settings(data: dict[str, Any]) -> None:
         return
     try:
         payload = json.dumps(data, ensure_ascii=False)
-        js = f"localStorage.setItem('{BROWSER_SETTINGS_KEY}', {json.dumps(payload)});"
+        js = f"(function(){{localStorage.setItem('{BROWSER_SETTINGS_KEY}', {json.dumps(payload)}); return true;}})()"
         streamlit_js_eval(
             js_expressions=js,
             key=f"browser_settings_set_{abs(hash(payload)) % 1000000000}",
-            want_output=False,
+            want_output=True,
         )
     except Exception:
         return
@@ -2299,7 +2300,9 @@ def render_cards_grouped(
 
 
 def parse_csv(text: str) -> list[str]:
-    return [x.strip() for x in text.split(",") if x.strip()]
+    if not text:
+        return []
+    return [x.strip() for x in re.split(r"[,，;\n]+", text) if x.strip()]
 
 
 def get_backend_openai_api_key() -> str:
@@ -2745,7 +2748,6 @@ def main() -> None:
                     st.session_state.saved_settings = new_settings
                     save_browser_settings(new_settings)
                     st.success(msg)
-                    st.rerun()
                 else:
                     st.error(msg)
         with cc:
