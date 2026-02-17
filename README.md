@@ -1,8 +1,30 @@
 # Research Digest App
 
-Streamlit 应用：按用户偏好抓取候选论文，去重、筛选、评分，并输出可读版论文推荐（介绍/方法总结/价值判断）。
+A Streamlit app that discovers new papers from selected journals/topics, de-duplicates results, enriches abstracts, and generates readable daily digests with optional AI-enhanced summaries.
 
-## Run
+## Features
+
+- Journal-first discovery with multi-select support.
+- Keyword/field filtering and exclude-keyword filtering.
+- De-duplication by identifier (DOI/PMID/arXiv), with title/author/year fallback.
+- Daily/weekly/custom time windows.
+- Two primary content tabs:
+  - Today Feed
+  - Worth Reading (AI-selected when API is enabled)
+- Journal-grouped paper feed with collapsible sections.
+- Collapsible full abstract on each paper card.
+- Optional AI summary enhancement (OpenAI API).
+- Slack-compatible webhook push.
+- Optional email delivery (frontend only asks for recipient email; SMTP is backend-managed).
+- Bilingual UI support (Chinese/English).
+
+## Project Structure
+
+- `app.py`: Main Streamlit application.
+- `daily_push.py`: CLI helper for scheduled push workflows.
+- `requirements.txt`: Python dependencies.
+
+## Quick Start
 
 ```bash
 python3 -m venv .venv
@@ -11,89 +33,111 @@ python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## 功能
+## Settings and Persistence
 
-- 用户自定义 `keywords`、`journals`（多选+自定义）、`exclude_keywords`、时间窗口和数量上限
-- 支持自动抓取（arXiv + Crossref），聚焦“当天新论文”
-- 支持可选 `Institution Proxy Prefix`（学校代理前缀）以便跳转受限期刊链接
-- 支持可选 ChatGPT API 增强中文总结（介绍/方法/价值）
-- 支持 Webhook 推送（Slack Incoming Webhook 兼容）
-- 支持 SMTP 邮件推送（前端仅需收件邮箱；SMTP 由后台统一配置）
-- 提供 `daily_push.py` 可配合 cron 做每日自动推送
-- 去重规则：
-  - 优先 DOI / PMID / arXiv ID
-  - 其次 `title + first_author + year`
-- 评分维度：`relevance` / `novelty` / `rigor` / `impact`，并按权重生成 `total`
-- 页面默认输出可读卡片；同时可展开查看/下载结构化 JSON
+The app supports safe per-user behavior for public deployments:
 
-## 注意
+- Browser local settings cache is used for user preferences.
+- Session state is used for generated digest display.
+- Server-side persistence is disabled by default on Streamlit Cloud to avoid cross-user leakage.
 
-- 当 `abstract` 缺失时，卡片会自动标注：
-  - `Abstract unavailable; summary is tentative.`
-- 自动抓取依赖外网访问 API（arXiv/Crossref）。
-- 学校账号登录流程在浏览器内完成，应用本身不保存学校账号密码。
+Environment flags:
 
-## 推送到 Slack（详细）
+- `PUBLIC_MODE=1` to force public-safe mode.
+- `SERVER_PERSISTENCE=1` only for trusted single-user/self-host setups.
 
-### 1. 在 Slack 创建 Incoming Webhook
+## Data Sources and Fallbacks
 
-1. 打开 `https://api.slack.com/apps`
-2. 创建一个 App（From scratch）
-3. 进入 `Incoming Webhooks`，开启开关
-4. 点击 `Add New Webhook to Workspace`
-5. 选择你要接收消息的频道
-6. 复制生成的 Webhook URL（形如 `https://hooks.slack.com/services/...`）
+Primary sources include Crossref, PubMed, RSS, and arXiv (depending on selected journals/queries).
 
-### 2. 在 App 中配置
+Reliability behavior includes:
 
-1. 打开应用里的 `⚙ 设置`
-2. 打开 `启用 Webhook 推送`
-3. 粘贴 `Webhook URL`
-4. 点击 `保存设置`
-5. 生成 Digest 后，点击 `推送到 Webhook`
+- short-term fetch cache,
+- stale-cache fallback when upstream temporarily returns empty,
+- journal-only mode for pure journal subscriptions,
+- targeted multi-journal backfill when only one journal is initially hit.
 
-### 3. 你会收到什么
+## AI Configuration
 
-- `今日论文（含链接）`：当天抓到的全部入选论文 + 链接
-- `值得读`：AI 选出的优先阅读论文摘要（若已启用并配置 API）
+To enable AI features:
 
-### 4. 常见问题排查
+1. Turn on **Use ChatGPT API** in Settings.
+2. Provide a **Session API Key** in Settings (session-only in public-safe mode).
+3. Choose model (default: `gpt-4.1-mini`).
 
-- 提示 `Webhook URL 为空`
-  - 设置里未保存 URL，或本地缓存被清空后未重新保存
-- 点击推送无消息
-  - 检查 Webhook URL 是否以 `https://hooks.slack.com/services/` 开头
-  - 检查频道是否还存在、机器人是否仍有发言权限
-- HTTP 非 2xx
-  - 通常是 URL 无效、被撤销、或 workspace 权限策略拦截
-- 生成有论文但 Slack 没有“值得读”
-  - 未启用 ChatGPT API、未填 API key，或模型请求失败/超时
+If no API key is set, AI-specific output is hidden/fallback behavior is used.
 
-## 每日自动推送（cron）
+## Slack Webhook Setup
 
-1. 先在 App 里下载一份 `user_prefs.json`
-2. 用命令测试一次：
+### Create Incoming Webhook
 
-```bash
-python daily_push.py --prefs user_prefs.json --webhook "https://your-webhook-url"
-```
+1. Go to `https://api.slack.com/apps`
+2. Create a new app.
+3. Enable **Incoming Webhooks**.
+4. Add webhook to a workspace channel.
+5. Copy URL like:
+   `https://hooks.slack.com/services/...`
 
-3. 发邮件测试（Gmail 示例）：
+### Configure in App
 
-```bash
-python daily_push.py \
-  --prefs user_prefs.json \
-  --email-to "your_email@example.com" \
-  --smtp-host "smtp.gmail.com" \
-  --smtp-port 587 \
-  --smtp-user "your_gmail@gmail.com" \
-  --smtp-password "your_app_password"
-```
+1. Open `⚙ Settings`
+2. Enable **Webhook Push**
+3. Paste Webhook URL
+4. Save settings
+5. Generate digest and click **Push to Webhook**
 
-说明：Gmail 需要使用 App Password，不是登录密码。
+### What gets pushed
 
-4. 配置 cron（示例：每天早上 8:30）：
+- Today's selected papers (with links)
+- Worth Reading summary (with links when available)
 
-```bash
-30 8 * * * cd "/path/to/research_push" && /path/to/research_push/.venv/bin/python daily_push.py --prefs user_prefs.json --webhook "https://your-webhook-url" >> /tmp/research_digest.log 2>&1
-```
+## Email Delivery
+
+Frontend:
+
+- User provides only recipient email.
+
+Backend SMTP (required):
+
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+
+You can set these via Streamlit Secrets or environment variables.
+
+## Deploy on Streamlit Community Cloud
+
+1. Push code to GitHub.
+2. Create app on Streamlit Cloud with:
+   - repository: your repo
+   - branch: `main`
+   - main file: `app.py`
+3. Add secrets/env vars if needed (OpenAI/SMTP).
+4. Deploy and test.
+
+## Troubleshooting
+
+### Only one journal appears
+
+- Check run diagnostics line:
+  - `Active journals: N (...)`
+- Clear local browser settings cache in Settings and save again.
+- Regenerate digest after confirming multiple journals are active.
+
+### Worth Reading is empty
+
+- Ensure **Use ChatGPT API** is enabled.
+- Ensure Session API Key is set.
+- Retry if API timeout/rate limit occurs.
+
+### Auto email warning appears
+
+- Backend SMTP is incomplete.
+- Configure `SMTP_HOST/PORT/USER/PASSWORD`, then re-enable auto email.
+
+### Webhook push fails
+
+- Confirm URL is valid and saved.
+- Confirm Slack webhook/channel permissions.
+- Check HTTP status and response in app notification.
