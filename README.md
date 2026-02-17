@@ -59,5 +59,5 @@ python daily_push.py \
 4. 配置 cron（示例：每天早上 8:30）：
 
 ```bash
-30 8 * * * cd "/Users/weizhang/Dropbox (Personal)/research_push" && /Users/weizhang/Dropbox\ (Personal)/research_push/.venv/bin/python daily_push.py --prefs user_prefs.json --webhook "https://your-webhook-url" >> /tmp/research_digest.log 2>&1
+30 8 * * * cd "/path/to/research_push" && /path/to/research_push/.venv/bin/python daily_push.py --prefs user_prefs.json --webhook "https://your-webhook-url" >> /tmp/research_digest.log 2>&1
 ```
