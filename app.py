@@ -1702,7 +1702,6 @@ def post_webhook(webhook_url: str, payload: dict[str, Any], lang: str = "zh") ->
         # Slack Incoming Webhook expects a Slack-shaped payload (e.g., "text").
         if "hooks.slack.com/services/" in url:
             date = payload.get("date", "")
-            today = str(payload.get("today_new_summary", ""))
             worth = str(payload.get("worth_reading_summary", ""))
             digest = payload.get("digest", {}) if isinstance(payload.get("digest"), dict) else {}
             today_papers: list[dict[str, Any]] = []
@@ -1720,9 +1719,6 @@ def post_webhook(webhook_url: str, payload: dict[str, Any], lang: str = "zh") ->
             text = "\n".join(
                 [
                     f"Research Digest {date}",
-                    "",
-                    L(lang, "今日摘要：", "Today's summary:"),
-                    today,
                     "",
                     L(lang, "今日论文（含链接）：", "Today's papers (with links):"),
                     "\n".join(paper_lines),
