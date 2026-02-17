@@ -2387,6 +2387,13 @@ def main() -> None:
         cs, cc = st.columns([1, 1])
         with cs:
             if st.button(L(ui_lang, "保存设置", "Save Settings"), type="primary", disabled=busy):
+                prev_webhook_url = str(cur.get("webhook_url", "")).strip()
+                input_webhook_url = webhook_url.strip()
+                # Keep existing webhook URL unless user explicitly replaces it.
+                webhook_url_final = input_webhook_url or prev_webhook_url
+                if enable_webhook_push and not webhook_url_final:
+                    st.error(L(ui_lang, "已启用 Webhook 推送，请填写 Webhook URL。", "Webhook push is enabled. Please provide a Webhook URL."))
+                    return
                 new_settings = {
                     "language": "zh" if language == lang_labels[0] else "en",
                     "fields": selected_fields,
@@ -2406,8 +2413,8 @@ def main() -> None:
                     "wg": 0.25,
                     "wi": 0.15,
                     "layout_mode": layout_mode,
-                    "enable_webhook_push": enable_webhook_push,
-                    "webhook_url": webhook_url,
+                    "enable_webhook_push": bool(enable_webhook_push and bool(webhook_url_final)),
+                    "webhook_url": webhook_url_final,
                     "email_to": email_to,
                     "smtp_host": smtp_host,
                     "smtp_port": int(smtp_port),
