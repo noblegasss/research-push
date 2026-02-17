@@ -2345,6 +2345,18 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
         if journals:
             rss_only = fetch_journal_rss(journals, max(days, 14))
             if rss_only:
+                selected_set = {canonical_journal_name(j) for j in journals if j}
+                rss_set = {canonical_journal_name(p.venue) for p in rss_only if p.venue}
+                # Avoid single-source bias in multi-journal strict mode.
+                if len(selected_set) > 1 and len(rss_set) <= 1:
+                    return [], L(
+                        lang,
+                        "严格匹配下 API 未命中，且 RSS 仅覆盖单一期刊，已跳过该回退以避免偏置。",
+                        "Strict mode API returned no hit, and RSS covered only one journal; skipped fallback to avoid bias.",
+                    ), diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0}, {
+                        "effective_days": max(days, 14),
+                        "effective_strict_journal_only": True,
+                    }
                 diag_rss = dict(diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0})
                 diag_rss["rss"] = int(diag_rss.get("rss", 0)) + len(rss_only)
                 diag_rss["total_raw"] = int(diag_rss.get("total_raw", 0)) + len(rss_only)
@@ -2465,6 +2477,8 @@ def main() -> None:
     def settings_modal() -> None:
         cur = st.session_state.saved_settings
         busy = bool(st.session_state.get("is_generating", False))
+        smtp_host_b, smtp_port_b, smtp_user_b, smtp_password_b = get_backend_smtp_config()
+        smtp_ready_b = all([smtp_host_b, smtp_user_b, smtp_password_b])
         lang_opt = cur.get("language", "zh")
         cset1, cset2 = st.columns(2)
         with cset1:
@@ -2528,8 +2542,20 @@ def main() -> None:
             enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=bool(cur.get("enable_webhook_push", False)))
             webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), cur.get("webhook_url", ""), disabled=not enable_webhook_push)
             email_to = st.text_input(L(ui_lang, "收件邮箱", "Email To"), cur.get("email_to", ""))
-            auto_send_email = st.toggle(L(ui_lang, "自动发送邮件", "Auto send email"), value=bool(cur.get("auto_send_email", False)))
+            auto_send_email = st.toggle(
+                L(ui_lang, "自动发送邮件", "Auto send email"),
+                value=bool(cur.get("auto_send_email", False)),
+                disabled=not smtp_ready_b,
+            )
             st.caption(L(ui_lang, "邮箱发送由后台 SMTP 配置统一管理。", "Email delivery uses backend SMTP configuration."))
+            if not smtp_ready_b:
+                st.caption(
+                    L(
+                        ui_lang,
+                        "后台 SMTP 未配置（SMTP_HOST/PORT/USER/PASSWORD），自动发邮件不可用。",
+                        "Backend SMTP is not configured (SMTP_HOST/PORT/USER/PASSWORD), auto-email is unavailable.",
+                    )
+                )
             use_api = st.toggle(L(ui_lang, "启用 ChatGPT API", "Use ChatGPT API"), value=bool(cur.get("use_api", False)))
             session_api_key = st.text_input(
                 L(ui_lang, "会话 API Key", "Session API Key"),
@@ -2579,7 +2605,7 @@ def main() -> None:
                     "enable_webhook_push": bool(enable_webhook_push and bool(webhook_url_final)),
                     "webhook_url": webhook_url_final,
                     "email_to": email_to,
-                    "auto_send_email": auto_send_email,
+                    "auto_send_email": bool(auto_send_email and smtp_ready_b),
                     "use_api": use_api,
                     "api_model": api_model,
                     "deep_read_mode": deep_read_mode,
