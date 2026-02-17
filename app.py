@@ -166,7 +166,8 @@ IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv
 PUBLIC_MODE = ENV_PUBLIC_MODE or IS_STREAMLIT_CLOUD
 # Server-side file persistence is disabled by default to avoid cross-user leakage.
 # Set SERVER_PERSISTENCE=1 only for trusted single-user/self-host deployments.
-SERVER_PERSISTENCE = os.getenv("SERVER_PERSISTENCE", "0").strip().lower() in {"1", "true", "yes", "on"}
+# Local run default: ON. Streamlit Cloud default: OFF.
+SERVER_PERSISTENCE = os.getenv("SERVER_PERSISTENCE", "0" if IS_STREAMLIT_CLOUD else "1").strip().lower() in {"1", "true", "yes", "on"}
 PERSIST_TO_DISK = (not PUBLIC_MODE) and SERVER_PERSISTENCE
 
 
@@ -2160,6 +2161,12 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
         "cache_hit": 0,
     }
     fetch_cache[cache_key] = {"ts": now_ts, "papers": combined, "diag": diag}
+    # If upstream sources temporarily return empty, fallback to stale cache for same query.
+    if not combined and cache_item and cache_item.get("papers"):
+        stale_diag = dict(cache_item.get("diag", {}))
+        stale_diag["cache_hit"] = 2
+        stale_diag["stale_cache_used"] = 1
+        return cache_item.get("papers", []), stale_diag
     # Trim cache size to avoid unbounded growth.
     if len(fetch_cache) > 20:
         oldest_key = min(fetch_cache.keys(), key=lambda k: float(fetch_cache[k].get("ts", 0)))
@@ -2171,6 +2178,7 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
     days = int(prefs.get("date_range_days", 14))
     strict = bool(prefs.get("strict_journal_only", True))
     lang = prefs.get("language", "zh")
+    journals = list(prefs.get("journals", []))
 
     papers, diag = fetch_candidates_once(prefs, days=days, strict_journal_only=strict)
     if papers:
@@ -2190,6 +2198,21 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
 
     # If strict journal matching is enabled, do not auto-relax journal matching.
     if strict:
+        # Fallback 2: RSS-only pull for selected journals over a slightly wider window.
+        if journals:
+            rss_only = fetch_journal_rss(journals, max(days, 14))
+            if rss_only:
+                diag_rss = dict(diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0})
+                diag_rss["rss"] = int(diag_rss.get("rss", 0)) + len(rss_only)
+                diag_rss["total_raw"] = int(diag_rss.get("total_raw", 0)) + len(rss_only)
+                return rss_only, L(
+                    lang,
+                    "严格匹配未命中 API 结果，已使用期刊 RSS 回退（近14天）。",
+                    "Strict matching missed API results; used journal RSS fallback (past 14 days).",
+                ), diag_rss, {
+                    "effective_days": max(days, 14),
+                    "effective_strict_journal_only": True,
+                }
         return [], L(lang, "严格期刊匹配未命中：已按你的设置保持严格模式（未自动放宽）。", "No hit under strict journal matching: strict mode is kept as configured (no auto-relax)."), diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0}, {
             "effective_days": 7 if days <= 1 else days,
             "effective_strict_journal_only": True,
@@ -2603,9 +2626,24 @@ def main() -> None:
             )
             if int(fetch_diag.get("cache_hit", 0)) == 1:
                 run_status.write(L(lang, "命中缓存（15分钟）", "Cache hit (15 minutes)"))
+            elif int(fetch_diag.get("cache_hit", 0)) == 2:
+                run_status.write(L(lang, "上游暂时无结果，已使用历史缓存", "Upstream temporarily empty; used stale cache"))
             if not papers:
                 run_status.update(label=L(lang, "生成失败", "Generation failed"), state="error")
-                st.error(L(lang, "未抓取到候选论文。建议：1) 关闭 Daily Mode 2) 放宽期刊匹配 3) 增加时间窗口到7-14天。", "No papers fetched. Try: 1) turn off Daily mode 2) relax journal match 3) extend to 7-14 days."))
+                st.error(
+                    L(
+                        lang,
+                        "未抓取到候选论文。建议：1) 关闭 Daily Mode 2) 放宽期刊匹配 3) 增加时间窗口到7-14天。",
+                        "No papers fetched. Try: 1) turn off Daily mode 2) relax journal match 3) extend to 7-14 days.",
+                    )
+                )
+                st.caption(
+                    L(
+                        lang,
+                        f"失败明细：{fetch_note} | Crossref {fetch_diag.get('crossref',0)} | PubMed {fetch_diag.get('pubmed',0)} | RSS {fetch_diag.get('rss',0)} | arXiv {fetch_diag.get('arxiv',0)}",
+                        f"Failure details: {fetch_note} | Crossref {fetch_diag.get('crossref',0)} | PubMed {fetch_diag.get('pubmed',0)} | RSS {fetch_diag.get('rss',0)} | arXiv {fetch_diag.get('arxiv',0)}",
+                    )
+                )
                 st.stop()
             run_status.write(L(lang, "正在构建 Digest 与 AI 总结...", "Building digest and AI summaries..."))
             digest = build_digest(prefs_runtime, papers)
