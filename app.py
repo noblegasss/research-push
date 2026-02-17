@@ -282,6 +282,26 @@ def parse_pubmed_date_node(node: ET.Element | None) -> str:
         return datetime(y, 1, 1).strftime("%Y-%m-%d")
 
 
+def normalize_str_list_input(value: Any) -> list[str]:
+    parts: list[str] = []
+    if isinstance(value, str):
+        value = [value]
+    if isinstance(value, list):
+        for item in value:
+            s = str(item or "").strip()
+            if not s:
+                continue
+            for tok in re.split(r"[,;\n]+", s):
+                t = tok.strip()
+                if t:
+                    parts.append(t)
+    out: list[str] = []
+    for x in parts:
+        if x not in out:
+            out.append(x)
+    return out
+
+
 def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower())
 
@@ -1574,10 +1594,8 @@ def load_browser_settings(defaults: dict[str, Any]) -> dict[str, Any]:
             return {}
         allowed = set(defaults.keys())
         out = {k: v for k, v in parsed.items() if k in allowed}
-        if isinstance(out.get("journals"), str):
-            out["journals"] = parse_csv(str(out.get("journals", "")))
-        if isinstance(out.get("fields"), str):
-            out["fields"] = parse_csv(str(out.get("fields", "")))
+        out["journals"] = normalize_str_list_input(out.get("journals", []))
+        out["fields"] = normalize_str_list_input(out.get("fields", []))
         return out
     except Exception:
         return {}
@@ -2226,12 +2244,12 @@ def render_cards_grouped(
         return
     groups: dict[str, list[dict[str, Any]]] = {}
     for c in cards:
-        ptype = paper_type_label(c.get("paper_type", "Research Article"), lang)
-        groups.setdefault(ptype, []).append(c)
-    # Show larger groups first.
-    ordered = sorted(groups.items(), key=lambda kv: len(kv[1]), reverse=True)
-    for gname, gcards in ordered:
-        with st.expander(f"{gname} ({len(gcards)})", expanded=True):
+        journal = str(c.get("venue", "")).strip() or L(lang, "未知期刊", "Unknown Venue")
+        groups.setdefault(journal, []).append(c)
+    # Show larger journal groups first, then by journal name.
+    ordered = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0].lower()))
+    for journal_name, gcards in ordered:
+        with st.expander(f"{journal_name} ({len(gcards)})", expanded=True):
             render_cards(
                 section_title=section_title,
                 cards=gcards,
@@ -2481,10 +2499,8 @@ def main() -> None:
         browser_override = load_browser_settings(default_settings)
         if browser_override:
             merged.update(browser_override)
-        if isinstance(merged.get("journals"), str):
-            merged["journals"] = parse_csv(str(merged.get("journals", "")))
-        if isinstance(merged.get("fields"), str):
-            merged["fields"] = parse_csv(str(merged.get("fields", "")))
+        merged["journals"] = normalize_str_list_input(merged.get("journals", []))
+        merged["fields"] = normalize_str_list_input(merged.get("fields", []))
         smtp_host_init, smtp_port_init, smtp_user_init, smtp_password_init = get_backend_smtp_config()
         smtp_ready_init = all([smtp_host_init, smtp_user_init, smtp_password_init])
         if not smtp_ready_init:
@@ -2635,9 +2651,9 @@ def main() -> None:
                     return
                 new_settings = {
                     "language": "zh" if language == lang_labels[0] else "en",
-                    "fields": selected_fields,
+                    "fields": normalize_str_list_input(selected_fields),
                     "custom_fields": custom_fields,
-                    "journals": selected_journals,
+                    "journals": normalize_str_list_input(selected_journals),
                     "custom_journals": custom_journals,
                     "strict_journal_only": strict_journal_only,
                     "keywords": keywords,
@@ -2773,9 +2789,9 @@ def main() -> None:
 
     s = st.session_state.saved_settings
     lang = s.get("language", "zh")
-    selected_fields = s.get("fields", [])
+    selected_fields = normalize_str_list_input(s.get("fields", []))
     custom_fields = s.get("custom_fields", "")
-    selected_journals = s.get("journals", [])
+    selected_journals = normalize_str_list_input(s.get("journals", []))
     custom_journals = s.get("custom_journals", "")
     strict_journal_only = bool(s.get("strict_journal_only", True))
     keywords = s.get("keywords", "")
