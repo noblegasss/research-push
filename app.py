@@ -2509,13 +2509,11 @@ def main() -> None:
     current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
     top_title = L(current_lang, "研究速递", "Research Digest")
     feed_title = L(current_lang, "今日论文", "Research Feed")
-    app_url = "https://research-push.streamlit.app/"
     st.markdown(
         f"""
         <div class="topbar">
           <div>
             <p class="topbar-title">{top_title}</p>
-            <p class="topbar-sub"><a href="{app_url}" target="_blank" rel="noopener noreferrer">{app_url}</a></p>
           </div>
         </div>
         <div class="hero">
