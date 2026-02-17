@@ -1573,7 +1573,12 @@ def load_browser_settings(defaults: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(parsed, dict):
             return {}
         allowed = set(defaults.keys())
-        return {k: v for k, v in parsed.items() if k in allowed}
+        out = {k: v for k, v in parsed.items() if k in allowed}
+        if isinstance(out.get("journals"), str):
+            out["journals"] = parse_csv(str(out.get("journals", "")))
+        if isinstance(out.get("fields"), str):
+            out["fields"] = parse_csv(str(out.get("fields", "")))
+        return out
     except Exception:
         return {}
 
@@ -1584,7 +1589,11 @@ def save_browser_settings(data: dict[str, Any]) -> None:
     try:
         payload = json.dumps(data, ensure_ascii=False)
         js = f"localStorage.setItem('{BROWSER_SETTINGS_KEY}', {json.dumps(payload)});"
-        streamlit_js_eval(js_expressions=js, key="browser_settings_set", want_output=False)
+        streamlit_js_eval(
+            js_expressions=js,
+            key=f"browser_settings_set_{abs(hash(payload)) % 1000000000}",
+            want_output=False,
+        )
     except Exception:
         return
 
@@ -2414,6 +2423,10 @@ def main() -> None:
         browser_override = load_browser_settings(default_settings)
         if browser_override:
             merged.update(browser_override)
+        if isinstance(merged.get("journals"), str):
+            merged["journals"] = parse_csv(str(merged.get("journals", "")))
+        if isinstance(merged.get("fields"), str):
+            merged["fields"] = parse_csv(str(merged.get("fields", "")))
         st.session_state.saved_settings = merged
     if "session_openai_api_key" not in st.session_state:
         st.session_state.session_openai_api_key = ""
@@ -2741,6 +2754,13 @@ def main() -> None:
                 effective_filter.get("effective_strict_journal_only", prefs["strict_journal_only"])
             )
             run_status.write(fetch_note)
+            run_status.write(
+                L(
+                    lang,
+                    f"当前生效期刊：{len(journals)} 个（{', '.join(journals[:5])}{'...' if len(journals) > 5 else ''}）",
+                    f"Active journals: {len(journals)} ({', '.join(journals[:5])}{'...' if len(journals) > 5 else ''})",
+                )
+            )
             run_status.write(
                 L(
                     lang,
