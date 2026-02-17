@@ -1078,6 +1078,73 @@ def fetch_crossref(keywords: list[str], journals: list[str], days: int, strict_j
     return out
 
 
+def fetch_crossref_by_journals(journals: list[str], days: int, strict_journal_only: bool = True) -> list[Paper]:
+    out: list[Paper] = []
+    cutoff = now_utc() - timedelta(days=days)
+    openalex_cache: dict[str, str] = {}
+    external_abstract_lookups = 0
+    for journal in journals[:20]:
+        j = (journal or "").strip()
+        if not j:
+            continue
+        try:
+            r = requests.get(
+                CROSSREF_API,
+                params={
+                    "query.container-title": j,
+                    "filter": f"from-pub-date:{cutoff.date().isoformat()}",
+                    "rows": 40,
+                    "sort": "published",
+                    "order": "desc",
+                },
+                timeout=20,
+            )
+            r.raise_for_status()
+            items = r.json().get("message", {}).get("items", []) or []
+            for it in items:
+                title = ((it.get("title") or [""])[0] or "").strip()
+                if not title:
+                    continue
+                venue = ((it.get("container-title") or [""])[0] or "").strip() or "Unknown Venue"
+                if journals and not venue_matches_selected(venue, journals, strict=strict_journal_only):
+                    continue
+                date = crossref_date(it)
+                dt = parse_date(date)
+                if dt and dt < cutoff:
+                    continue
+                authors: list[str] = []
+                for a in it.get("author", []) or []:
+                    full = f"{(a.get('given') or '').strip()} {(a.get('family') or '').strip()}".strip()
+                    if full:
+                        authors.append(full)
+                doi = (it.get("DOI") or "").strip()
+                abstract = clean_abstract(it.get("abstract") or "")
+                if not abstract and doi and external_abstract_lookups < MAX_CROSSREF_ABSTRACT_LOOKUPS:
+                    if doi in openalex_cache:
+                        abstract = openalex_cache[doi]
+                    else:
+                        abstract = fetch_openalex_abstract_by_doi(doi)
+                        openalex_cache[doi] = abstract
+                        external_abstract_lookups += 1
+                if not abstract and external_abstract_lookups < MAX_CROSSREF_ABSTRACT_LOOKUPS:
+                    abstract = fetch_semantic_scholar_abstract(doi=doi, title=title)
+                    external_abstract_lookups += 1
+                out.append(
+                    Paper(
+                        title=title,
+                        authors=authors,
+                        venue=venue,
+                        publication_date=date,
+                        doi=doi,
+                        abstract=abstract,
+                        url=(it.get("URL") or "").strip(),
+                    )
+                )
+        except Exception:
+            continue
+    return out
+
+
 def fetch_openalex_abstract_by_doi(doi: str) -> str:
     if not doi:
         return ""
@@ -2171,6 +2238,7 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
     query_terms = kws + fields
     if not query_terms:
         query_terms = journals[:]
+    journal_only_mode = (not kws and not fields and bool(journals))
 
     # arXiv should be keyword/field-driven, not journal-name-driven.
     # If user only selected journals (no topic terms), do not crawl arXiv by journal names.
@@ -2204,9 +2272,14 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
 
     with ThreadPoolExecutor(max_workers=4) as ex:
         fut_arxiv = ex.submit(fetch_arxiv, arxiv_terms, days)
-        fut_crossref = ex.submit(fetch_crossref, query_terms, journals, days, strict_journal_only)
+        if journal_only_mode:
+            fut_crossref = ex.submit(fetch_crossref_by_journals, journals, days, strict_journal_only)
+            pubmed_terms = [f"\"{j}\"[journal]" for j in journals[:10]]
+            fut_pubmed = ex.submit(fetch_pubmed, pubmed_terms, journals, days, strict_journal_only)
+        else:
+            fut_crossref = ex.submit(fetch_crossref, query_terms, journals, days, strict_journal_only)
+            fut_pubmed = ex.submit(fetch_pubmed, query_terms, journals, days, strict_journal_only)
         fut_rss = ex.submit(fetch_journal_rss, journals, days)
-        fut_pubmed = ex.submit(fetch_pubmed, query_terms, journals, days, strict_journal_only)
         arxiv_results = fut_arxiv.result()
         crossref_results = fut_crossref.result()
         rss_results = fut_rss.result()
