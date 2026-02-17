@@ -169,10 +169,9 @@ ENV_PUBLIC_MODE = os.getenv("PUBLIC_MODE", "0").strip().lower() in {"1", "true",
 IS_STREAMLIT_CLOUD = bool(os.getenv("STREAMLIT_SHARING_MODE")) or bool(os.getenv("STREAMLIT_CLOUD"))
 # On Streamlit Community Cloud, default to public-safe mode unless explicitly overridden.
 PUBLIC_MODE = ENV_PUBLIC_MODE or IS_STREAMLIT_CLOUD
-# Server-side file persistence is disabled by default to avoid cross-user leakage.
-# Set SERVER_PERSISTENCE=1 only for trusted single-user/self-host deployments.
-# Local run default: ON. Streamlit Cloud default: OFF.
-SERVER_PERSISTENCE = os.getenv("SERVER_PERSISTENCE", "0" if IS_STREAMLIT_CLOUD else "1").strip().lower() in {"1", "true", "yes", "on"}
+# Server-side file persistence is OFF by default to avoid cross-user leakage.
+# Enable only for trusted single-user/self-host deployments.
+SERVER_PERSISTENCE = os.getenv("SERVER_PERSISTENCE", "0").strip().lower() in {"1", "true", "yes", "on"}
 PERSIST_TO_DISK = (not PUBLIC_MODE) and SERVER_PERSISTENCE
 
 
