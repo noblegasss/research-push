@@ -2568,6 +2568,16 @@ def main() -> None:
         if not smtp_ready_init:
             merged["auto_send_email"] = False
         st.session_state.saved_settings = merged
+    else:
+        # streamlit_js_eval may return browser localStorage value on a later rerun.
+        # Re-sync on each run so settings do not appear to "reset" over time.
+        browser_override = load_browser_settings(default_settings)
+        if browser_override:
+            merged = dict(st.session_state.saved_settings)
+            merged.update(browser_override)
+            merged["journals"] = normalize_str_list_input(merged.get("journals", []))
+            merged["fields"] = normalize_str_list_input(merged.get("fields", []))
+            st.session_state.saved_settings = merged
     if "session_openai_api_key" not in st.session_state:
         st.session_state.session_openai_api_key = ""
     if "local_cache" not in st.session_state:
