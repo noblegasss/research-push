@@ -17,6 +17,10 @@ import requests
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 try:
+    import feedparser
+except Exception:
+    feedparser = None
+try:
     from streamlit_js_eval import streamlit_js_eval
 except Exception:
     streamlit_js_eval = None
@@ -374,6 +378,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
     cutoff = now_utc() - timedelta(days=days)
     feeds = selected_rss_urls(journals)
     for journal_norm, feed_url in feeds:
+        feed_added = 0
         try:
             r = requests.get(
                 feed_url,
@@ -416,6 +421,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                         url=link,
                     )
                 )
+                feed_added += 1
             # Atom (many publisher feeds use Atom `entry`)
             for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry"):
                 title = (entry.findtext("{http://www.w3.org/2005/Atom}title", default="") or "").strip()
@@ -453,6 +459,39 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                         url=link,
                     )
                 )
+                feed_added += 1
+            # Fallback parser for feeds with uncommon namespace/structure.
+            if feed_added == 0 and feedparser is not None:
+                fp = feedparser.parse(r.text)
+                for e in getattr(fp, "entries", [])[:200]:
+                    title = (getattr(e, "title", "") or "").strip()
+                    link = (getattr(e, "link", "") or "").strip()
+                    desc = clean_abstract((getattr(e, "summary", "") or getattr(e, "description", "") or "").strip())
+                    pub = (getattr(e, "published", "") or getattr(e, "updated", "") or "").strip()
+                    dt = None
+                    if getattr(e, "published_parsed", None):
+                        try:
+                            ts = datetime(*e.published_parsed[:6], tzinfo=UTC)
+                            dt = ts
+                        except Exception:
+                            dt = None
+                    if not dt and pub:
+                        dt = parse_rss_datetime(pub) or parse_date(pub[:10])
+                    if dt and dt < cutoff:
+                        continue
+                    date = dt.strftime("%Y-%m-%d") if dt else (pub[:10] if pub else "")
+                    if not title:
+                        continue
+                    out.append(
+                        Paper(
+                            title=title,
+                            authors=[],
+                            venue=journal_norm.title(),
+                            publication_date=date,
+                            abstract=desc,
+                            url=link,
+                        )
+                    )
         except Exception:
             continue
     return out
@@ -2617,16 +2656,6 @@ def main() -> None:
         if not smtp_ready_init:
             merged["auto_send_email"] = False
         st.session_state.saved_settings = merged
-    else:
-        # streamlit_js_eval may return browser localStorage value on a later rerun.
-        # Re-sync on each run so settings do not appear to "reset" over time.
-        browser_override = load_browser_settings(default_settings)
-        if browser_override:
-            merged = dict(st.session_state.saved_settings)
-            merged.update(browser_override)
-            merged["journals"] = normalize_str_list_input(merged.get("journals", []))
-            merged["fields"] = normalize_str_list_input(merged.get("fields", []))
-            st.session_state.saved_settings = merged
     if "session_openai_api_key" not in st.session_state:
         st.session_state.session_openai_api_key = ""
     if "local_cache" not in st.session_state:
