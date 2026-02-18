@@ -2947,8 +2947,16 @@ def main() -> None:
     worth_count = int(s.get("worth_count", 4))
     auto_refresh_on_load = bool(s.get("auto_refresh_on_load", False))
 
-    fields = list(dict.fromkeys(selected_fields + parse_csv(custom_fields)))
-    journals = list(dict.fromkeys(selected_journals + parse_csv(custom_journals)))
+    # If multiselect has values, treat it as the source of truth and ignore custom text leftovers.
+    # This avoids hidden stale entries (e.g., old custom journals) from polluting selection.
+    if selected_fields:
+        fields = list(dict.fromkeys(selected_fields))
+    else:
+        fields = list(dict.fromkeys(parse_csv(custom_fields)))
+    if selected_journals:
+        journals = list(dict.fromkeys(selected_journals))
+    else:
+        journals = list(dict.fromkeys(parse_csv(custom_journals)))
     keywords = parse_csv(keywords)
     exclude = parse_csv(exclude)
     api_key = get_backend_openai_api_key()
@@ -3016,6 +3024,13 @@ def main() -> None:
                     lang,
                     f"当前生效期刊：{len(journals)} 个（{', '.join(journals[:5])}{'...' if len(journals) > 5 else ''}）",
                     f"Active journals: {len(journals)} ({', '.join(journals[:5])}{'...' if len(journals) > 5 else ''})",
+                )
+            )
+            run_status.write(
+                L(
+                    lang,
+                    f"生效期刊完整列表：{', '.join(journals)}",
+                    f"Active journal list: {', '.join(journals)}",
                 )
             )
             run_status.write(
