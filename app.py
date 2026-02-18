@@ -1139,7 +1139,7 @@ def fetch_crossref_by_journals(journals: list[str], days: int, strict_journal_on
     cutoff = now_utc() - timedelta(days=days)
     openalex_cache: dict[str, str] = {}
     external_abstract_lookups = 0
-    for journal in journals[:20]:
+    for journal in journals[:30]:
         j = (journal or "").strip()
         if not j:
             continue
@@ -1149,7 +1149,7 @@ def fetch_crossref_by_journals(journals: list[str], days: int, strict_journal_on
                 params={
                     "query.container-title": j,
                     "filter": f"from-pub-date:{cutoff.date().isoformat()}",
-                    "rows": 40,
+                    "rows": 20,
                     "sort": "published",
                     "order": "desc",
                 },
@@ -2390,15 +2390,20 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
             fut_crossref = ex.submit(fetch_crossref_by_journals, journals, days, strict_journal_only)
             pubmed_terms = [f"\"{j}\"[journal]" for j in journals[:10]]
             fut_pubmed = ex.submit(fetch_pubmed, pubmed_terms, journals, days, strict_journal_only)
+            fut_crossref_journal = None
         else:
             fut_crossref = ex.submit(fetch_crossref, query_terms, journals, days, strict_journal_only)
             fut_pubmed = ex.submit(fetch_pubmed, query_terms, journals, days, strict_journal_only)
+            # Always add a journal-driven pull to avoid missing same-day papers
+            # when keyword queries are too narrow.
+            fut_crossref_journal = ex.submit(fetch_crossref_by_journals, journals, days, strict_journal_only) if journals else None
         fut_rss = ex.submit(fetch_journal_rss, journals, days)
         arxiv_results = fut_arxiv.result()
         crossref_results = fut_crossref.result()
+        crossref_journal_results = fut_crossref_journal.result() if fut_crossref_journal else []
         rss_results = fut_rss.result()
         pubmed_results = fut_pubmed.result()
-    combined = arxiv_results + crossref_results + rss_results + pubmed_results
+    combined = arxiv_results + crossref_results + crossref_journal_results + rss_results + pubmed_results
 
     # Journal-only multi-select guard: if only one journal is hit, try to backfill missing journals.
     journal_backfill = 0
@@ -2422,10 +2427,10 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
     combined = enrich_missing_abstracts(combined, max_enrich=MAX_ABSTRACT_ENRICH)
     diag = {
         "arxiv": len(arxiv_results),
-        "crossref": len(crossref_results),
+        "crossref": len(crossref_results) + len(crossref_journal_results),
         "rss": len(rss_results),
         "pubmed": len(pubmed_results),
-        "total_raw": len(arxiv_results) + len(crossref_results) + len(rss_results) + len(pubmed_results),
+        "total_raw": len(arxiv_results) + len(crossref_results) + len(crossref_journal_results) + len(rss_results) + len(pubmed_results),
         "journal_backfill": journal_backfill,
         "cache_hit": 0,
     }
