@@ -1,25 +1,42 @@
 {
   "language": "en",
-  "fields": [
-    "Machine Learning",
-    "Statistics"
-  ],
+  "fields": [],
   "journals": [
-    "Nature",
     "Nature Communications",
+    "Nature",
     "Nature Medicine",
     "Nature Biotechnology",
+    "Scientific Reports",
+    "Science Translational Medicine",
     "Science",
     "Cell",
-    "The Lancet"
+    "Cell Reports",
+    "Cancer Cell",
+    "PLOS ONE",
+    "PNAS",
+    "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+    "Genome Biology",
+    "Nucleic Acids Research",
+    "Briefings in Bioinformatics",
+    "Genome Research",
+    "Journal of Biomedical Informatics",
+    "Artificial Intelligence in Medicine",
+    "Bioinformatics",
+    "The Lancet",
+    "eLife",
+    "Frontiers in Oncology",
+    "NEJM",
+    "JAMA Oncology",
+    "PLOS Biology",
+    "PLOS Medicine",
+    "ICML",
+    "NeurIPS",
+    "JAMA Network Open",
+    "JAMA Neurology",
+    "ICLR"
   ],
   "strict_journal_only": true,
-  "keywords": [
-    "machine learning",
-    "statistics",
-    "clinical AI",
-    "biomedical"
-  ],
+  "keywords": [],
   "exclude_keywords": [
     "protocol only"
   ],

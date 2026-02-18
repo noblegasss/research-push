@@ -2414,7 +2414,7 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
         for j in missing[:8]:
             # Backfill must stay strict; relaxed matching causes false positives
             # (e.g., journals containing generic words like "Nature").
-            extra = fetch_crossref_by_journals([j], days=max(days, 7), strict_journal_only=True)
+            extra = fetch_crossref_by_journals([j], days=days, strict_journal_only=True)
             extra = [p for p in extra if venue_matches_selected(p.venue or "", [j], strict=True)]
             if extra:
                 combined.extend(extra)
@@ -2456,20 +2456,11 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
             "effective_strict_journal_only": strict,
         }
 
-    # Fallback 1: widen date range when daily window is too narrow.
-    if days <= 1:
-        papers, diag = fetch_candidates_once(prefs, days=7, strict_journal_only=strict)
-        if papers:
-            return papers, L(lang, "当天未命中，已自动扩展到近7天。", "No hit today; auto-expanded to past 7 days."), diag, {
-                "effective_days": 7,
-                "effective_strict_journal_only": strict,
-            }
-
     # If strict journal matching is enabled, do not auto-relax journal matching.
     if strict:
-        # Fallback 2: RSS-only pull for selected journals over a slightly wider window.
+        # Fallback: RSS-only pull for selected journals within the same day window.
         if journals:
-            rss_only = fetch_journal_rss(journals, max(days, 14))
+            rss_only = fetch_journal_rss(journals, days)
             if rss_only:
                 selected_set = {canonical_journal_name(j) for j in journals if j}
                 rss_set = {canonical_journal_name(p.venue) for p in rss_only if p.venue}
@@ -2480,7 +2471,7 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
                         "严格匹配下 API 未命中，且 RSS 仅覆盖单一期刊，已跳过该回退以避免偏置。",
                         "Strict mode API returned no hit, and RSS covered only one journal; skipped fallback to avoid bias.",
                     ), diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0}, {
-                        "effective_days": max(days, 14),
+                        "effective_days": days,
                         "effective_strict_journal_only": True,
                     }
                 diag_rss = dict(diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0})
@@ -2488,14 +2479,14 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
                 diag_rss["total_raw"] = int(diag_rss.get("total_raw", 0)) + len(rss_only)
                 return rss_only, L(
                     lang,
-                    "严格匹配未命中 API 结果，已使用期刊 RSS 回退（近14天）。",
-                    "Strict matching missed API results; used journal RSS fallback (past 14 days).",
+                    "严格匹配未命中 API 结果，已使用期刊 RSS 当天回退。",
+                    "Strict matching missed API results; used same-day journal RSS fallback.",
                 ), diag_rss, {
-                    "effective_days": max(days, 14),
+                    "effective_days": days,
                     "effective_strict_journal_only": True,
                 }
         return [], L(lang, "严格期刊匹配未命中：已按你的设置保持严格模式（未自动放宽）。", "No hit under strict journal matching: strict mode is kept as configured (no auto-relax)."), diag if "diag" in locals() else {"arxiv": 0, "crossref": 0, "rss": 0, "pubmed": 0, "total_raw": 0}, {
-            "effective_days": 7 if days <= 1 else days,
+            "effective_days": days,
             "effective_strict_journal_only": True,
         }
 
