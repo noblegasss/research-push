@@ -375,7 +375,14 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
     feeds = selected_rss_urls(journals)
     for journal_norm, feed_url in feeds:
         try:
-            r = requests.get(feed_url, timeout=15)
+            r = requests.get(
+                feed_url,
+                timeout=15,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+                    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+                },
+            )
             if r.status_code != 200:
                 continue
             root = ET.fromstring(r.text)
@@ -389,6 +396,14 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                 if dt and dt < cutoff:
                     continue
                 date = dt.strftime("%Y-%m-%d") if dt else ""
+                if not date:
+                    # common RSS alternatives
+                    alt_date = (
+                        (item.findtext("{http://purl.org/dc/elements/1.1/date", default="") or "").strip()
+                        or (item.findtext("{http://prismstandard.org/namespaces/basic/2.0/coverDate", default="") or "").strip()
+                    )
+                    if alt_date:
+                        date = alt_date[:10]
                 if not title:
                     continue
                 out.append(
@@ -417,6 +432,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                 pub = (
                     entry.findtext("{http://www.w3.org/2005/Atom}published", default="")
                     or entry.findtext("{http://www.w3.org/2005/Atom}updated", default="")
+                    or entry.findtext("{http://purl.org/dc/elements/1.1/date", default="")
                     or ""
                 ).strip()
                 dt = parse_date(pub[:10]) if pub else None
@@ -2782,6 +2798,13 @@ def main() -> None:
                     st.session_state.session_openai_api_key = session_api_key.strip()
                     st.session_state.saved_settings = new_settings
                     save_browser_settings(new_settings)
+                    # Settings changed: clear previous digest to avoid showing stale results.
+                    st.session_state.last_digest = None
+                    st.session_state.last_push_text = None
+                    st.session_state.last_today_cards = None
+                    st.session_state.last_worth_cards = None
+                    st.session_state.last_fetch_note = ""
+                    st.session_state.last_fetch_diag = {}
                     st.success(msg)
                 else:
                     st.error(msg)
@@ -2954,6 +2977,7 @@ def main() -> None:
         "reading_level": "mixed",
         "ranking_weights": {"relevance": 0.35, "novelty": 0.25, "rigor": 0.25, "impact": 0.15},
     }
+    prefs_sig = json.dumps(prefs, ensure_ascii=False, sort_keys=True)
 
     if auto_refresh_on_load and "auto_ran_once" not in st.session_state:
         if push_schedule == "weekly_monday" and not is_monday:
@@ -3181,6 +3205,7 @@ def main() -> None:
             st.session_state.last_worth_cards = worth_cards
             st.session_state.last_fetch_note = fetch_note
             st.session_state.last_fetch_diag = fetch_diag
+            st.session_state.last_digest_prefs_sig = prefs_sig
             if st.session_state.get("local_cache_dirty", False):
                 save_local_cache(st.session_state.get("local_cache", {}))
                 st.session_state.local_cache_dirty = False
@@ -3188,7 +3213,7 @@ def main() -> None:
         finally:
             st.session_state.is_generating = False
 
-    if st.session_state.get("last_digest"):
+    if st.session_state.get("last_digest") and st.session_state.get("last_digest_prefs_sig", "") == prefs_sig:
         digest = st.session_state.last_digest
         push_text = st.session_state.last_push_text or {"today_new_summary": "", "worth_reading_summary": ""}
         today_cards = st.session_state.last_today_cards or []
@@ -3332,6 +3357,8 @@ def main() -> None:
             with st.expander(L(lang, "查看/下载结构化 JSON", "View/Download Structured JSON")):
                 st.code(digest_json, language="json")
                 st.download_button(L(lang, "下载 Digest JSON", "Download Digest JSON"), data=digest_json, file_name="research_digest.json", mime="application/json")
+    elif st.session_state.get("last_digest"):
+        st.info(L(lang, "检测到设置已更新，请重新生成 Digest。", "Settings changed. Please generate a new digest."))
 
 if __name__ == "__main__":
     main()
