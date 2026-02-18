@@ -24,9 +24,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Verify prefs file
+      - name: Ensure prefs file
         run: |
-          test -f user_prefs.json || (echo "Missing user_prefs.json in repo root" && exit 1)
+          if [ ! -f user_prefs.json ]; then
+            cat > user_prefs.json << 'JSON'
+          {
+            "language": "en",
+            "fields": [],
+            "journals": ["Nature", "Nature Communications"],
+            "strict_journal_only": true,
+            "keywords": [],
+            "exclude_keywords": [],
+            "date_range_days": 1,
+            "max_papers": 20,
+            "reading_level": "mixed",
+            "ranking_weights": {"relevance": 0.35, "novelty": 0.25, "rigor": 0.25, "impact": 0.15}
+          }
+          JSON
+          fi
 
       - name: Run daily push
         env:
