@@ -28,9 +28,14 @@ def main() -> None:
         prefs = json.load(f)
 
     prefs["date_range_days"] = 1
-    papers = fetch_candidates(prefs)
-    digest = build_digest(prefs, papers)
-    push_text = build_daily_push_text(digest)
+    papers, _fetch_note, _fetch_diag, effective_filter = fetch_candidates(prefs)
+    prefs_runtime = dict(prefs)
+    prefs_runtime["date_range_days"] = int(effective_filter.get("effective_days", prefs.get("date_range_days", 1)))
+    prefs_runtime["strict_journal_only"] = bool(
+        effective_filter.get("effective_strict_journal_only", prefs.get("strict_journal_only", True))
+    )
+    digest = build_digest(prefs_runtime, papers)
+    push_text = build_daily_push_text(digest, lang=str(prefs_runtime.get("language", "zh")))
 
     webhook_url = args.webhook or os.getenv("WEBHOOK_URL", "")
     if webhook_url.strip():
@@ -42,6 +47,7 @@ def main() -> None:
                 "worth_reading_summary": push_text["worth_reading_summary"],
                 "digest": digest,
             },
+            lang=str(prefs_runtime.get("language", "zh")),
         )
         if not ok:
             raise SystemExit(msg)
@@ -60,7 +66,8 @@ def main() -> None:
             smtp_password=smtp_password,
             to_email=email_to,
             subject=f"Research Digest {datetime.now(UTC).strftime('%Y-%m-%d')}",
-            body=format_email_body(digest, push_text),
+            body=format_email_body(digest, push_text, lang=str(prefs_runtime.get("language", "zh"))),
+            lang=str(prefs_runtime.get("language", "zh")),
         )
         if not ok:
             raise SystemExit(msg)

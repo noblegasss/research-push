@@ -117,3 +117,23 @@ You can set these via Streamlit Secrets or environment variables.
    - main file: `app.py`
 3. Add secrets/env vars if needed (OpenAI/SMTP).
 4. Deploy and test.
+
+## Daily Auto Push via GitHub Actions
+
+This repo includes `.github/workflows/daily_slack_push.yml` to push digest to Slack daily.
+
+Required setup:
+
+1. Add `user_prefs.json` to repo root (the workflow reads this file).
+2. In GitHub repo settings, add secret:
+   - `SLACK_WEBHOOK_URL`
+3. Enable Actions in the repository.
+4. Optionally run once manually via **Actions -> Daily Slack Push -> Run workflow**.
+
+Schedule:
+
+- Default: `30 13 * * *` (13:30 UTC, about 08:30 US Eastern in standard time).
+
+Security note:
+
+- If a webhook URL was ever posted publicly, rotate/revoke it in Slack immediately and replace the GitHub secret.
