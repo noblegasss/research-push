@@ -2012,7 +2012,8 @@ def card(item: dict[str, Any], prefs: dict[str, Any]) -> dict[str, Any]:
         if matched
         else L(lang, "匹配你的关键词与期刊偏好，值得优先阅读。", "Matches your keywords and journal preferences; worth prioritizing.")
     )
-    t1 = (L(lang, "关注主题：", "Focus: ") + f"{re.sub(r'\\s+', ' ', p.title)[:16]}")[:25]
+    short_title = re.sub(r"\s+", " ", p.title)[:16]
+    t1 = (L(lang, "关注主题：", "Focus: ") + short_title)[:25]
     t2 = (
         L(lang, "方法线索较明确，可快读", "Method signal is clear; quick read")
         if p.abstract and any(k in p.abstract.lower() for k in ["randomized", "trial", "cohort", "review", "benchmark"])
@@ -2122,9 +2123,16 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
             filtered = relaxed
             filter_mode = "relaxed_no_keyword"
     if not filtered and deduped:
-        # Fallback 2: date-only fallback to avoid empty feed
+        # Fallback 2: date-only fallback to avoid empty feed.
+        # IMPORTANT: if journals are selected, never break journal scope.
         filtered = []
         for p in deduped:
+            if prefs.get("journals") and not venue_matches_selected(
+                p.venue or "",
+                prefs.get("journals", []),
+                strict=bool(prefs.get("strict_journal_only", True)),
+            ):
+                continue
             dt = parse_date(p.publication_date)
             if dt and dt < now_utc() - timedelta(days=int(prefs.get("date_range_days", 14))):
                 continue
