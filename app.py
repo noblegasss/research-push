@@ -2119,6 +2119,33 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
     scored.sort(key=lambda x: x["scores"]["total"], reverse=True)
     max_papers = int(prefs.get("max_papers", 0))
     picked = scored if max_papers <= 0 else scored[:max_papers]
+    # Journal diversity guard: when multiple journals are selected, avoid single-journal domination.
+    selected_journals = normalize_str_list_input(prefs.get("journals", []))
+    if selected_journals and len(selected_journals) > 1 and scored:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for item in scored:
+            p = item["paper"]
+            assigned = None
+            for j in selected_journals:
+                if venue_matches_selected(p.venue or "", [j], strict=bool(prefs.get("strict_journal_only", True))):
+                    assigned = j
+                    break
+            if not assigned:
+                assigned = p.venue or "Unknown Venue"
+            grouped.setdefault(assigned, []).append(item)
+        balanced: list[dict[str, Any]] = []
+        # first pass: pick one from each journal bucket (score-sorted already)
+        for j in selected_journals:
+            bucket = grouped.get(j, [])
+            if bucket:
+                balanced.append(bucket.pop(0))
+        # second pass: fill remaining by global score order
+        used_ids = {id(x["paper"]) for x in balanced}
+        for item in scored:
+            if id(item["paper"]) in used_ids:
+                continue
+            balanced.append(item)
+        picked = balanced if max_papers <= 0 else balanced[:max_papers]
     n = len(picked)
     top_n = n if n <= 3 else 3 if n <= 5 else 5
     top, also = picked[:top_n], picked[top_n:]
@@ -2379,7 +2406,7 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
     now_ts = datetime.now(UTC).timestamp()
     fetch_cache = st.session_state.setdefault("fetch_cache", {})
     cache_item = fetch_cache.get(cache_key)
-    if cache_item and now_ts - float(cache_item.get("ts", 0)) <= FETCH_CACHE_TTL_SEC:
+    if cache_item and now_ts - float(cache_item.get("ts", 0)) <= FETCH_CACHE_TTL_SEC and cache_item.get("papers"):
         cached_diag = dict(cache_item["diag"])
         cached_diag["cache_hit"] = 1
         return cache_item["papers"], cached_diag
@@ -2434,7 +2461,9 @@ def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only:
         "journal_backfill": journal_backfill,
         "cache_hit": 0,
     }
-    fetch_cache[cache_key] = {"ts": now_ts, "papers": combined, "diag": diag}
+    # Cache only non-empty fetch results to avoid "empty cache lock" for 15 minutes.
+    if combined:
+        fetch_cache[cache_key] = {"ts": now_ts, "papers": combined, "diag": diag}
     # If upstream sources temporarily return empty, fallback to stale cache for same query.
     if not combined and cache_item and cache_item.get("papers"):
         stale_diag = dict(cache_item.get("diag", {}))
