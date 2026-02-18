@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 from xml.etree import ElementTree as ET
 
 import requests
@@ -200,10 +201,22 @@ def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def now_local() -> datetime:
+    tz_name = os.getenv("APP_TIMEZONE", "America/New_York").strip() or "America/New_York"
+    try:
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return now_utc()
+
+
+def window_start_date(days: int) -> datetime.date:
+    return (now_local() - timedelta(days=max(0, int(days)))).date()
+
+
 def in_day_window(dt: datetime | None, days: int) -> bool:
     if dt is None:
         return True
-    cutoff_date = (now_utc() - timedelta(days=max(0, int(days)))).date()
+    cutoff_date = window_start_date(days)
     return dt.date() >= cutoff_date
 
 
@@ -1141,14 +1154,14 @@ def crossref_date(item: dict[str, Any]) -> str:
 
 def fetch_crossref(keywords: list[str], journals: list[str], days: int, strict_journal_only: bool = True) -> list[Paper]:
     out: list[Paper] = []
-    cutoff = now_utc() - timedelta(days=days)
+    start_date = window_start_date(days)
     openalex_cache: dict[str, str] = {}
     external_abstract_lookups = 0
     for kw in keywords:
         try:
             r = requests.get(
                 CROSSREF_API,
-                params={"query": kw, "filter": f"from-pub-date:{cutoff.date().isoformat()}", "rows": 30, "sort": "published", "order": "desc"},
+                params={"query": kw, "filter": f"from-pub-date:{start_date.isoformat()}", "rows": 30, "sort": "published", "order": "desc"},
                 timeout=20,
             )
             r.raise_for_status()
@@ -1198,7 +1211,7 @@ def fetch_crossref(keywords: list[str], journals: list[str], days: int, strict_j
 
 def fetch_crossref_by_journals(journals: list[str], days: int, strict_journal_only: bool = True) -> list[Paper]:
     out: list[Paper] = []
-    cutoff = now_utc() - timedelta(days=days)
+    start_date = window_start_date(days)
     openalex_cache: dict[str, str] = {}
     external_abstract_lookups = 0
     for journal in journals[:30]:
@@ -1210,7 +1223,7 @@ def fetch_crossref_by_journals(journals: list[str], days: int, strict_journal_on
                 CROSSREF_API,
                 params={
                     "query.container-title": j,
-                    "filter": f"from-pub-date:{cutoff.date().isoformat()}",
+                    "filter": f"from-pub-date:{start_date.isoformat()}",
                     "rows": 20,
                     "sort": "published",
                     "order": "desc",
@@ -2875,10 +2888,13 @@ def main() -> None:
             mime="application/json",
             disabled=busy,
         )
-        if st.button(L(ui_lang, "清空本地设置缓存", "Clear Local Settings Cache"), disabled=busy):
-            clear_browser_settings()
-            st.session_state.saved_settings = default_settings.copy()
-            st.success(L(ui_lang, "已清空本地缓存并恢复默认设置。", "Local cache cleared and defaults restored."))
+        if st.button(L(ui_lang, "清空抓取缓存", "Clear Fetch Cache"), disabled=busy):
+            # Clear runtime/persistent fetch caches only; keep user settings intact.
+            st.session_state.fetch_cache = {}
+            st.session_state.local_cache = {"abstract_by_id": {}, "llm_summary_cache": {}}
+            st.session_state.llm_summary_cache = {}
+            st.session_state.local_cache_dirty = True
+            st.success(L(ui_lang, "已清空抓取缓存（设置保持不变）。", "Fetch cache cleared (settings unchanged)."))
             st.rerun()
 
     @st.dialog(L(st.session_state.saved_settings.get("language", "zh"), "使用说明", "How to Use"), width="large")
