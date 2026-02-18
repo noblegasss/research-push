@@ -2,8 +2,9 @@ name: Daily Slack Push
 
 on:
   schedule:
-    # 13:30 UTC ~= 08:30 US Eastern (EST). Adjust for DST if needed.
-    - cron: "30 13 * * *"
+    # 01:00 UTC ~= 20:00 US Eastern (EST, previous day local date).
+    # During daylight saving time (EDT), this runs at 21:00 local.
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 jobs:
