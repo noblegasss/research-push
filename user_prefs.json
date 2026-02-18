@@ -1,0 +1,35 @@
+{
+  "language": "en",
+  "fields": [
+    "Machine Learning",
+    "Statistics"
+  ],
+  "journals": [
+    "Nature",
+    "Nature Communications",
+    "Nature Medicine",
+    "Nature Biotechnology",
+    "Science",
+    "Cell",
+    "The Lancet"
+  ],
+  "strict_journal_only": true,
+  "keywords": [
+    "machine learning",
+    "statistics",
+    "clinical AI",
+    "biomedical"
+  ],
+  "exclude_keywords": [
+    "protocol only"
+  ],
+  "date_range_days": 1,
+  "max_papers": 20,
+  "reading_level": "mixed",
+  "ranking_weights": {
+    "relevance": 0.35,
+    "novelty": 0.25,
+    "rigor": 0.25,
+    "impact": 0.15
+  }
+}
