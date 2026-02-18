@@ -2553,6 +2553,19 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
             "effective_strict_journal_only": strict,
         }
 
+    # Same-day index lag fallback: keep strict journal scope, widen only slightly.
+    if days == 1 and strict and journals:
+        papers_3d, diag_3d = fetch_candidates_once(prefs, days=3, strict_journal_only=True)
+        if papers_3d:
+            return papers_3d, L(
+                lang,
+                "当天未命中，已启用近3天索引滞后补抓（仍严格限制在所选期刊）。",
+                "No same-day hit; enabled 3-day index-lag fallback (still strict to selected journals).",
+            ), diag_3d, {
+                "effective_days": 3,
+                "effective_strict_journal_only": True,
+            }
+
     # If strict journal matching is enabled, do not auto-relax journal matching.
     if strict:
         # Fallback: RSS-only pull for selected journals within the same day window.
