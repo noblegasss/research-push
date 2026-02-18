@@ -200,6 +200,13 @@ def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def in_day_window(dt: datetime | None, days: int) -> bool:
+    if dt is None:
+        return True
+    cutoff_date = (now_utc() - timedelta(days=max(0, int(days)))).date()
+    return dt.date() >= cutoff_date
+
+
 def parse_date(text: str) -> datetime | None:
     if not text:
         return None
@@ -398,7 +405,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                 desc = clean_abstract((item.findtext("description", default="") or "").strip())
                 pub = (item.findtext("pubDate", default="") or "").strip()
                 dt = parse_rss_datetime(pub)
-                if dt and dt < cutoff:
+                if not in_day_window(dt, days):
                     continue
                 date = dt.strftime("%Y-%m-%d") if dt else ""
                 if not date:
@@ -444,7 +451,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                 dt = parse_date(pub[:10]) if pub else None
                 if not dt:
                     dt = parse_rss_datetime(pub)
-                if dt and dt < cutoff:
+                if not in_day_window(dt, days):
                     continue
                 date = dt.strftime("%Y-%m-%d") if dt else (pub[:10] if pub else "")
                 if not title:
@@ -477,7 +484,7 @@ def fetch_journal_rss(journals: list[str], days: int) -> list[Paper]:
                             dt = None
                     if not dt and pub:
                         dt = parse_rss_datetime(pub) or parse_date(pub[:10])
-                    if dt and dt < cutoff:
+                    if not in_day_window(dt, days):
                         continue
                     date = dt.strftime("%Y-%m-%d") if dt else (pub[:10] if pub else "")
                     if not title:
@@ -583,7 +590,7 @@ def fetch_pubmed(
                 if journals and not venue_matches_selected(venue, journals, strict=strict_journal_only):
                     continue
                 dt = parse_date(date)
-                if dt and dt < cutoff:
+                if not in_day_window(dt, days):
                     continue
 
                 out.append(
@@ -1108,7 +1115,7 @@ def fetch_arxiv(keywords: list[str], days: int) -> list[Paper]:
                 abstract = (e.findtext("atom:summary", default="", namespaces=ns) or "").strip()
                 published = (e.findtext("atom:published", default="", namespaces=ns) or "").strip()[:10]
                 dt = parse_date(published)
-                if dt and dt < cutoff:
+                if not in_day_window(dt, days):
                     continue
                 url = (e.findtext("atom:id", default="", namespaces=ns) or "").strip()
                 authors = [(a.findtext("atom:name", default="", namespaces=ns) or "").strip() for a in e.findall("atom:author", ns)]
@@ -1154,7 +1161,7 @@ def fetch_crossref(keywords: list[str], journals: list[str], days: int, strict_j
                     continue
                 date = crossref_date(it)
                 dt = parse_date(date)
-                if dt and dt < cutoff:
+                if not in_day_window(dt, days):
                     continue
                 authors = []
                 for a in it.get("author", []) or []:
@@ -1221,7 +1228,7 @@ def fetch_crossref_by_journals(journals: list[str], days: int, strict_journal_on
                     continue
                 date = crossref_date(it)
                 dt = parse_date(date)
-                if dt and dt < cutoff:
+                if not in_day_window(dt, days):
                     continue
                 authors: list[str] = []
                 for a in it.get("author", []) or []:
@@ -1443,7 +1450,7 @@ def passes(p: Paper, prefs: dict[str, Any]) -> bool:
     if (not journals) and keywords and not any(k.lower() in text for k in keywords):
         return False
     dt = parse_date(p.publication_date)
-    if dt and dt < now_utc() - timedelta(days=int(prefs.get("date_range_days", 14))):
+    if not in_day_window(dt, int(prefs.get("date_range_days", 14))):
         return False
     return True
 
@@ -2155,7 +2162,7 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
             ):
                 continue
             dt = parse_date(p.publication_date)
-            if dt and dt < now_utc() - timedelta(days=int(prefs.get("date_range_days", 14))):
+            if not in_day_window(dt, int(prefs.get("date_range_days", 14))):
                 continue
             relaxed.append(p)
         if relaxed:
@@ -2173,7 +2180,7 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
             ):
                 continue
             dt = parse_date(p.publication_date)
-            if dt and dt < now_utc() - timedelta(days=int(prefs.get("date_range_days", 14))):
+            if not in_day_window(dt, int(prefs.get("date_range_days", 14))):
                 continue
             filtered.append(p)
         if filtered:
