@@ -138,35 +138,4 @@ Security note:
 
 - If a webhook URL was ever posted publicly, rotate/revoke it in Slack immediately and replace the GitHub secret.
 
-## Multi-User Auto Push (Web Version)
 
-For Streamlit Community Cloud, use Postgres + GitHub Actions.
-
-1. Add Streamlit secret:
-
-```toml
-AUTO_PUSH_DATABASE_URL="postgresql://..."
-AUTO_PUSH_MULTIUSER="1"
-```
-
-2. Add GitHub repository secrets:
-
-- `AUTO_PUSH_DATABASE_URL` (same Postgres URL)
-- Optional email secrets: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`
-- Optional `OPENAI_API_KEY`
-
-3. Enable workflow `.github/workflows/auto_push_multiuser.yml`.
-
-4. In app settings (per user):
-
-- Enable `Auto Push Subscription`
-- Set `Daily Push Time (HH:MM)` and `Push Timezone (IANA)`
-- Configure at least one delivery target (Webhook or auto-email)
-
-The workflow runs every 5 minutes and executes:
-
-```bash
-python daily_push.py --all-due
-```
-
-The worker checks each subscribed user's timezone/time and sends only due subscriptions.
