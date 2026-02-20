@@ -189,6 +189,7 @@ AUTO_PUSH_DATABASE_URL = os.getenv("AUTO_PUSH_DATABASE_URL", "").strip()
 AUTO_PUSH_DB_FILE = Path(os.getenv("AUTO_PUSH_DB_FILE", ".auto_push_subscriptions.sqlite3"))
 AUTO_PUSH_BACKEND = "postgres" if AUTO_PUSH_DATABASE_URL else ("sqlite" if SERVER_PERSISTENCE else "")
 AUTO_PUSH_ENABLED = AUTO_PUSH_MULTIUSER and bool(AUTO_PUSH_BACKEND)
+SHOW_AUTO_PUSH_ADMIN_INFO = os.getenv("SHOW_AUTO_PUSH_ADMIN_INFO", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -3337,41 +3338,42 @@ def main() -> None:
             disabled=busy,
         )
         tz_for_cron = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
-        hhmm_for_cron = normalize_hhmm(str(cur.get("daily_push_time", "09:00"))) or "09:00"
-        hh, mm = hhmm_for_cron.split(":")
-        if AUTO_PUSH_ENABLED:
-            if AUTO_PUSH_BACKEND == "postgres":
-                cron_line = "python daily_push.py --all-due"
-                st.caption(
-                    L(
-                        ui_lang,
-                        "多用户自动推送（推荐在 GitHub Actions/云调度中每5分钟运行一次）",
-                        "Multi-user auto push (recommended: run every 5 minutes in GitHub Actions/cloud scheduler)",
+        if SHOW_AUTO_PUSH_ADMIN_INFO:
+            hhmm_for_cron = normalize_hhmm(str(cur.get("daily_push_time", "09:00"))) or "09:00"
+            hh, mm = hhmm_for_cron.split(":")
+            if AUTO_PUSH_ENABLED:
+                if AUTO_PUSH_BACKEND == "postgres":
+                    cron_line = "python daily_push.py --all-due"
+                    st.caption(
+                        L(
+                            ui_lang,
+                            "多用户自动推送（推荐在 GitHub Actions/云调度中每5分钟运行一次）",
+                            "Multi-user auto push (recommended: run every 5 minutes in GitHub Actions/cloud scheduler)",
+                        )
                     )
-                )
+                else:
+                    cron_line = f"* * * * * cd \"{Path.cwd()}\" && .venv/bin/python daily_push.py --all-due"
+                    st.caption(
+                        L(
+                            ui_lang,
+                            "多用户自动推送（推荐每分钟扫描一次到点用户）",
+                            "Multi-user auto push (recommended: check due users every minute)",
+                        )
+                    )
             else:
-                cron_line = f"* * * * * cd \"{Path.cwd()}\" && .venv/bin/python daily_push.py --all-due"
-                st.caption(
-                    L(
-                        ui_lang,
-                        "多用户自动推送（推荐每分钟扫描一次到点用户）",
-                        "Multi-user auto push (recommended: check due users every minute)",
-                    )
+                cron_line = (
+                    f"CRON_TZ={tz_for_cron} {int(mm)} {int(hh)} * * * "
+                    f"cd \"{Path.cwd()}\" && .venv/bin/python daily_push.py --prefs user_prefs.json"
                 )
-        else:
-            cron_line = (
-                f"CRON_TZ={tz_for_cron} {int(mm)} {int(hh)} * * * "
-                f"cd \"{Path.cwd()}\" && .venv/bin/python daily_push.py --prefs user_prefs.json"
+                st.caption(L(ui_lang, "每日自动推送（单用户示例）", "Daily auto push (single-user example)"))
+            st.code(cron_line, language="bash")
+            st.caption(
+                L(
+                    ui_lang,
+                    f"你的订阅用户ID：{str(cur.get('subscriber_id', ''))[:12]}",
+                    f"Your subscription user id: {str(cur.get('subscriber_id', ''))[:12]}",
+                )
             )
-            st.caption(L(ui_lang, "每日自动推送（单用户示例）", "Daily auto push (single-user example)"))
-        st.code(cron_line, language="bash")
-        st.caption(
-            L(
-                ui_lang,
-                f"你的订阅用户ID：{str(cur.get('subscriber_id', ''))[:12]}",
-                f"Your subscription user id: {str(cur.get('subscriber_id', ''))[:12]}",
-            )
-        )
         if st.button(L(ui_lang, "清空抓取缓存", "Clear Fetch Cache"), disabled=busy):
             # Clear runtime/persistent fetch caches only; keep user settings intact.
             st.session_state.fetch_cache = {}
