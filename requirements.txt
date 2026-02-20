@@ -5,3 +5,4 @@ beautifulsoup4
 pypdf
 streamlit-js-eval
 feedparser
+psycopg2-binary

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import smtplib
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,12 +12,17 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 from xml.etree import ElementTree as ET
 
 import requests
 import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
+try:
+    import psycopg2
+except Exception:
+    psycopg2 = None
 try:
     import feedparser
 except Exception:
@@ -178,6 +184,11 @@ PUBLIC_MODE = ENV_PUBLIC_MODE or IS_STREAMLIT_CLOUD
 # Enable only for trusted single-user/self-host deployments.
 SERVER_PERSISTENCE = os.getenv("SERVER_PERSISTENCE", "0").strip().lower() in {"1", "true", "yes", "on"}
 PERSIST_TO_DISK = (not PUBLIC_MODE) and SERVER_PERSISTENCE
+AUTO_PUSH_MULTIUSER = os.getenv("AUTO_PUSH_MULTIUSER", "1").strip().lower() in {"1", "true", "yes", "on"}
+AUTO_PUSH_DATABASE_URL = os.getenv("AUTO_PUSH_DATABASE_URL", "").strip()
+AUTO_PUSH_DB_FILE = Path(os.getenv("AUTO_PUSH_DB_FILE", ".auto_push_subscriptions.sqlite3"))
+AUTO_PUSH_BACKEND = "postgres" if AUTO_PUSH_DATABASE_URL else ("sqlite" if SERVER_PERSISTENCE else "")
+AUTO_PUSH_ENABLED = AUTO_PUSH_MULTIUSER and bool(AUTO_PUSH_BACKEND)
 
 
 @dataclass
@@ -207,6 +218,33 @@ def now_local() -> datetime:
         return datetime.now(ZoneInfo(tz_name))
     except Exception:
         return now_utc()
+
+
+def parse_hhmm(text: str) -> tuple[int, int] | None:
+    raw = (text or "").strip()
+    m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", raw)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def normalize_hhmm(text: str) -> str:
+    parsed = parse_hhmm(text)
+    if parsed is None:
+        return ""
+    hh, mm = parsed
+    return f"{hh:02d}:{mm:02d}"
+
+
+def normalize_timezone(text: str) -> str:
+    tz_name = (text or "").strip()
+    if not tz_name:
+        return ""
+    try:
+        ZoneInfo(tz_name)
+        return tz_name
+    except Exception:
+        return ""
 
 
 def window_start_date(days: int) -> datetime.date:
@@ -1743,6 +1781,343 @@ def clear_browser_settings() -> None:
         return
 
 
+def normalize_push_schedule(value: str) -> str:
+    schedule = str(value or "daily").strip().lower()
+    if schedule == "weekly (monday)":
+        return "weekly_monday"
+    if schedule in {"daily", "weekly_monday", "custom"}:
+        return schedule
+    return "daily"
+
+
+def push_days_by_schedule(schedule: str, custom_days: int) -> int:
+    if schedule == "daily":
+        return 1
+    if schedule == "weekly_monday":
+        return 7
+    return max(1, int(custom_days or 1))
+
+
+def build_runtime_prefs_from_settings(settings: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    def parse_setting_tokens(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return normalize_str_list_input(value)
+        return parse_csv(str(value or ""))
+
+    selected_fields = normalize_str_list_input(settings.get("fields", []))
+    selected_journals = normalize_str_list_input(settings.get("journals", []))
+    custom_fields = str(settings.get("custom_fields", ""))
+    custom_journals = str(settings.get("custom_journals", ""))
+    push_schedule = normalize_push_schedule(str(settings.get("push_schedule", "daily")))
+    custom_days = int(settings.get("custom_days", 7))
+    if selected_fields:
+        fields = list(dict.fromkeys(selected_fields))
+    else:
+        fields = list(dict.fromkeys(parse_csv(custom_fields)))
+    if selected_journals:
+        journals = list(dict.fromkeys(selected_journals))
+    else:
+        journals = list(dict.fromkeys(parse_csv(custom_journals)))
+    keywords = parse_setting_tokens(settings.get("keywords", ""))
+    exclude = parse_setting_tokens(settings.get("exclude_keywords", "survey"))
+    days = push_days_by_schedule(push_schedule, custom_days)
+    prefs = {
+        "language": str(settings.get("language", "zh")),
+        "fields": fields,
+        "journals": journals,
+        "strict_journal_only": bool(settings.get("strict_journal_only", True)),
+        "keywords": keywords,
+        "exclude_keywords": exclude,
+        "date_range_days": days,
+        "max_papers": int(settings.get("max_papers", 0)),
+        "reading_level": "mixed",
+        "ranking_weights": {"relevance": 0.35, "novelty": 0.25, "rigor": 0.25, "impact": 0.15},
+    }
+    return prefs, {
+        "push_schedule": push_schedule,
+        "custom_days": custom_days,
+        "daily_push_time": normalize_hhmm(str(settings.get("daily_push_time", "09:00"))) or "09:00",
+        "push_timezone": normalize_timezone(
+            str(settings.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))
+        )
+        or "America/New_York",
+    }
+
+
+def auto_push_backend_reason() -> str:
+    if not AUTO_PUSH_MULTIUSER:
+        return "AUTO_PUSH_MULTIUSER is disabled."
+    if AUTO_PUSH_BACKEND == "postgres" and psycopg2 is None:
+        return "AUTO_PUSH_DATABASE_URL is set but psycopg2 is not installed."
+    if not AUTO_PUSH_BACKEND:
+        return "No backend configured. Set AUTO_PUSH_DATABASE_URL or SERVER_PERSISTENCE=1."
+    return ""
+
+
+def init_auto_push_db() -> None:
+    if not AUTO_PUSH_ENABLED:
+        return
+    if AUTO_PUSH_BACKEND == "postgres":
+        if psycopg2 is None:
+            return
+        try:
+            with psycopg2.connect(AUTO_PUSH_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS auto_push_subscriptions (
+                            subscriber_id TEXT PRIMARY KEY,
+                            enabled INTEGER NOT NULL DEFAULT 0,
+                            schedule TEXT NOT NULL,
+                            custom_days INTEGER NOT NULL DEFAULT 7,
+                            push_time TEXT NOT NULL,
+                            timezone TEXT NOT NULL,
+                            settings_json TEXT NOT NULL,
+                            last_run_local_date TEXT NOT NULL DEFAULT '',
+                            last_error TEXT NOT NULL DEFAULT '',
+                            updated_at_utc TEXT NOT NULL
+                        )
+                        """
+                    )
+            return
+        except Exception:
+            return
+    if AUTO_PUSH_BACKEND != "sqlite":
+        return
+    try:
+        with sqlite3.connect(AUTO_PUSH_DB_FILE) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS auto_push_subscriptions (
+                    subscriber_id TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 0,
+                    schedule TEXT NOT NULL,
+                    custom_days INTEGER NOT NULL DEFAULT 7,
+                    push_time TEXT NOT NULL,
+                    timezone TEXT NOT NULL,
+                    settings_json TEXT NOT NULL,
+                    last_run_local_date TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    updated_at_utc TEXT NOT NULL
+                )
+                """
+            )
+    except Exception:
+        return
+
+
+def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], enabled: bool) -> tuple[bool, str]:
+    if not AUTO_PUSH_ENABLED:
+        return False, auto_push_backend_reason() or "Auto-push persistence is disabled."
+    sid = (subscriber_id or "").strip()
+    if not sid:
+        return False, "Missing subscriber id."
+    init_auto_push_db()
+    prefs, plan = build_runtime_prefs_from_settings(settings)
+    packed_settings = dict(settings)
+    packed_settings["derived_prefs"] = prefs
+    params = (
+        sid,
+        1 if enabled else 0,
+        plan["push_schedule"],
+        int(plan["custom_days"]),
+        plan["daily_push_time"],
+        plan["push_timezone"],
+        json.dumps(packed_settings, ensure_ascii=False),
+        now_utc().isoformat(),
+    )
+    if AUTO_PUSH_BACKEND == "postgres":
+        if psycopg2 is None:
+            return False, "psycopg2 is not installed."
+        try:
+            with psycopg2.connect(AUTO_PUSH_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO auto_push_subscriptions
+                        (subscriber_id, enabled, schedule, custom_days, push_time, timezone, settings_json, last_run_local_date, last_error, updated_at_utc)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, '', '', %s)
+                        ON CONFLICT(subscriber_id) DO UPDATE SET
+                            enabled=EXCLUDED.enabled,
+                            schedule=EXCLUDED.schedule,
+                            custom_days=EXCLUDED.custom_days,
+                            push_time=EXCLUDED.push_time,
+                            timezone=EXCLUDED.timezone,
+                            settings_json=EXCLUDED.settings_json,
+                            updated_at_utc=EXCLUDED.updated_at_utc
+                        """,
+                        params,
+                    )
+            return True, "ok"
+        except Exception as exc:
+            return False, str(exc)
+    if AUTO_PUSH_BACKEND != "sqlite":
+        return False, auto_push_backend_reason() or "Auto-push backend unavailable."
+    try:
+        with sqlite3.connect(AUTO_PUSH_DB_FILE) as conn:
+            conn.execute(
+                """
+                INSERT INTO auto_push_subscriptions
+                (subscriber_id, enabled, schedule, custom_days, push_time, timezone, settings_json, last_run_local_date, last_error, updated_at_utc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?)
+                ON CONFLICT(subscriber_id) DO UPDATE SET
+                    enabled=excluded.enabled,
+                    schedule=excluded.schedule,
+                    custom_days=excluded.custom_days,
+                    push_time=excluded.push_time,
+                    timezone=excluded.timezone,
+                    settings_json=excluded.settings_json,
+                    updated_at_utc=excluded.updated_at_utc
+                """,
+                params,
+            )
+        return True, "ok"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def list_due_auto_push_subscriptions(now_dt: datetime | None = None) -> list[dict[str, Any]]:
+    if not AUTO_PUSH_ENABLED:
+        return []
+    init_auto_push_db()
+    now_dt = now_dt or now_utc()
+    rows: list[dict[str, Any]] = []
+    if AUTO_PUSH_BACKEND == "postgres":
+        if psycopg2 is None:
+            return []
+        try:
+            with psycopg2.connect(AUTO_PUSH_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT subscriber_id, schedule, custom_days, push_time, timezone, settings_json, last_run_local_date
+                        FROM auto_push_subscriptions
+                        WHERE enabled = 1
+                        """
+                    )
+                    for row in cur.fetchall():
+                        rows.append(
+                            {
+                                "subscriber_id": row[0],
+                                "schedule": row[1],
+                                "custom_days": row[2],
+                                "push_time": row[3],
+                                "timezone": row[4],
+                                "settings_json": row[5],
+                                "last_run_local_date": row[6],
+                            }
+                        )
+        except Exception:
+            return []
+    elif AUTO_PUSH_BACKEND == "sqlite":
+        try:
+            with sqlite3.connect(AUTO_PUSH_DB_FILE) as conn:
+                conn.row_factory = sqlite3.Row
+                raw_rows = conn.execute(
+                    """
+                    SELECT subscriber_id, schedule, custom_days, push_time, timezone, settings_json, last_run_local_date
+                    FROM auto_push_subscriptions
+                    WHERE enabled = 1
+                    """
+                ).fetchall()
+                rows = [dict(r) for r in raw_rows]
+        except Exception:
+            return []
+    else:
+        return []
+
+    due: list[dict[str, Any]] = []
+    for row in rows:
+        tz_name = normalize_timezone(str(row["timezone"])) or "America/New_York"
+        try:
+            local_dt = now_dt.astimezone(ZoneInfo(tz_name))
+        except Exception:
+            local_dt = now_dt
+        schedule = normalize_push_schedule(str(row["schedule"]))
+        push_time = normalize_hhmm(str(row["push_time"])) or "09:00"
+        if local_dt.strftime("%H:%M") != push_time:
+            continue
+        if schedule == "weekly_monday" and local_dt.weekday() != 0:
+            continue
+        local_date = local_dt.date().isoformat()
+        if (row["last_run_local_date"] or "") == local_date:
+            continue
+        try:
+            settings = json.loads(row["settings_json"])
+            if not isinstance(settings, dict):
+                continue
+        except Exception:
+            continue
+        due.append(
+            {
+                "subscriber_id": str(row["subscriber_id"]),
+                "settings": settings,
+                "local_date": local_date,
+                "local_time": push_time,
+                "timezone": tz_name,
+            }
+        )
+    return due
+
+
+def mark_auto_push_run(subscriber_id: str, local_date: str | None, error: str = "") -> None:
+    if not AUTO_PUSH_ENABLED:
+        return
+    err = (error or "")[:500]
+    now_text = now_utc().isoformat()
+    if AUTO_PUSH_BACKEND == "postgres":
+        if psycopg2 is None:
+            return
+        try:
+            with psycopg2.connect(AUTO_PUSH_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    if local_date:
+                        cur.execute(
+                            """
+                            UPDATE auto_push_subscriptions
+                            SET last_run_local_date = %s, last_error = %s, updated_at_utc = %s
+                            WHERE subscriber_id = %s
+                            """,
+                            (local_date, err, now_text, subscriber_id),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            UPDATE auto_push_subscriptions
+                            SET last_error = %s, updated_at_utc = %s
+                            WHERE subscriber_id = %s
+                            """,
+                            (err, now_text, subscriber_id),
+                        )
+            return
+        except Exception:
+            return
+    if AUTO_PUSH_BACKEND != "sqlite":
+        return
+    try:
+        with sqlite3.connect(AUTO_PUSH_DB_FILE) as conn:
+            if local_date:
+                conn.execute(
+                    """
+                    UPDATE auto_push_subscriptions
+                    SET last_run_local_date = ?, last_error = ?, updated_at_utc = ?
+                    WHERE subscriber_id = ?
+                    """,
+                    (local_date, err, now_text, subscriber_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE auto_push_subscriptions
+                    SET last_error = ?, updated_at_utc = ?
+                    WHERE subscriber_id = ?
+                    """,
+                    (err, now_text, subscriber_id),
+                )
+    except Exception:
+        return
+
+
 def fallback_feed_summary(p: Paper, sc: dict[str, int], lang: str = "zh") -> str:
     if p.abstract:
         abs_text = abstract_snippet(p.abstract, max_chars=180, lang=lang)
@@ -2629,6 +3004,7 @@ def fetch_candidates(prefs: dict[str, Any]) -> tuple[list[Paper], str, dict[str,
 def main() -> None:
     st.set_page_config(page_title="Research Digest Engine", layout="wide")
     inject_styles()
+    init_auto_push_db()
     current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
     top_title = L(current_lang, "研究速递", "Research Digest")
     feed_title = L(current_lang, "今日论文", "Research Feed")
@@ -2669,6 +3045,10 @@ def main() -> None:
         "webhook_url": "",
         "email_to": "",
         "auto_send_email": False,
+        "enable_auto_push": False,
+        "daily_push_time": "09:00",
+        "push_timezone": os.getenv("APP_TIMEZONE", "America/New_York").strip() or "America/New_York",
+        "subscriber_id": "",
         "use_api": False,
         "api_model": "gpt-4.1-mini",
         "deep_read_mode": False,
@@ -2682,6 +3062,8 @@ def main() -> None:
         browser_override = load_browser_settings(default_settings)
         if browser_override:
             merged.update(browser_override)
+        if not str(merged.get("subscriber_id", "")).strip():
+            merged["subscriber_id"] = uuid4().hex
         merged["journals"] = normalize_str_list_input(merged.get("journals", []))
         merged["fields"] = normalize_str_list_input(merged.get("fields", []))
         smtp_host_init, smtp_port_init, smtp_user_init, smtp_password_init = get_backend_smtp_config()
@@ -2788,6 +3170,31 @@ def main() -> None:
             layout_mode = layout_keys[layout_labels.index(layout_label)]
         with cset2:
             proxy_prefix = st.text_input(L(ui_lang, "学校代理前缀", "Institution Proxy Prefix"), cur.get("proxy_prefix", ""))
+            enable_auto_push = st.toggle(
+                L(ui_lang, "启用自动推送订阅", "Enable Auto Push Subscription"),
+                value=bool(cur.get("enable_auto_push", False)),
+                help=L(ui_lang, "开启后可被后台定时任务按用户独立推送。", "When enabled, backend scheduler can push per user."),
+                disabled=not AUTO_PUSH_ENABLED,
+            )
+            if not AUTO_PUSH_ENABLED:
+                reason = auto_push_backend_reason()
+                st.caption(
+                    L(
+                        ui_lang,
+                        f"自动推送订阅存储未启用：{reason or '请配置 AUTO_PUSH_DATABASE_URL 或 SERVER_PERSISTENCE=1。'}",
+                        f"Auto-push subscription storage is disabled: {reason or 'Configure AUTO_PUSH_DATABASE_URL or SERVER_PERSISTENCE=1.'}",
+                    )
+                )
+            daily_push_time = st.text_input(
+                L(ui_lang, "每日推送时间（HH:MM）", "Daily Push Time (HH:MM)"),
+                value=str(cur.get("daily_push_time", "09:00")),
+                help=L(ui_lang, "用于外部定时任务（cron/云调度）。", "Used by external scheduler (cron/cloud scheduler)."),
+            )
+            push_timezone = st.text_input(
+                L(ui_lang, "推送时区（IANA）", "Push Timezone (IANA)"),
+                value=str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York"))),
+                help=L(ui_lang, "例如 Asia/Shanghai, America/New_York。", "For example: Asia/Shanghai, America/New_York."),
+            )
             enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=bool(cur.get("enable_webhook_push", False)))
             webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), cur.get("webhook_url", ""), disabled=not enable_webhook_push)
             email_to = st.text_input(L(ui_lang, "收件邮箱", "Email To"), cur.get("email_to", ""))
@@ -2827,11 +3234,31 @@ def main() -> None:
             if st.button(L(ui_lang, "保存设置", "Save Settings"), type="primary", disabled=busy):
                 prev_webhook_url = str(cur.get("webhook_url", "")).strip()
                 input_webhook_url = webhook_url.strip()
+                daily_push_time_norm = normalize_hhmm(daily_push_time)
+                if not daily_push_time_norm:
+                    st.error(L(ui_lang, "每日推送时间格式无效，请使用 HH:MM（24小时制）。", "Invalid daily push time. Use HH:MM in 24-hour format."))
+                    return
+                push_timezone_norm = normalize_timezone(push_timezone)
+                if not push_timezone_norm:
+                    st.error(L(ui_lang, "时区无效，请填写 IANA 时区名（如 Asia/Shanghai）。", "Invalid timezone. Use an IANA timezone name (for example Asia/Shanghai)."))
+                    return
                 # Keep existing webhook URL unless user explicitly replaces it.
                 webhook_url_final = input_webhook_url or prev_webhook_url
                 if enable_webhook_push and not webhook_url_final:
                     st.error(L(ui_lang, "已启用 Webhook 推送，请填写 Webhook URL。", "Webhook push is enabled. Please provide a Webhook URL."))
                     return
+                if enable_auto_push:
+                    has_webhook_target = bool(enable_webhook_push and webhook_url_final)
+                    has_email_target = bool(auto_send_email and email_to.strip())
+                    if not has_webhook_target and not has_email_target:
+                        st.error(
+                            L(
+                                ui_lang,
+                                "已启用自动推送订阅，但没有可用推送目标。请配置 Webhook 或开启自动邮件并填写收件邮箱。",
+                                "Auto push is enabled but no delivery target is configured. Set webhook or auto-email recipient.",
+                            )
+                        )
+                        return
                 new_settings = {
                     "language": "zh" if language == lang_labels[0] else "en",
                     "fields": normalize_str_list_input(selected_fields),
@@ -2855,6 +3282,10 @@ def main() -> None:
                     "webhook_url": webhook_url_final,
                     "email_to": email_to,
                     "auto_send_email": bool(auto_send_email and smtp_ready_b),
+                    "enable_auto_push": bool(enable_auto_push and AUTO_PUSH_ENABLED),
+                    "daily_push_time": daily_push_time_norm,
+                    "push_timezone": push_timezone_norm,
+                    "subscriber_id": str(cur.get("subscriber_id", "")).strip() or uuid4().hex,
                     "use_api": use_api,
                     "api_model": api_model,
                     "deep_read_mode": deep_read_mode,
@@ -2865,6 +3296,14 @@ def main() -> None:
                 }
                 ok, msg = save_settings(new_settings)
                 if ok:
+                    sub_ok, sub_msg = upsert_auto_push_subscription(
+                        new_settings["subscriber_id"],
+                        new_settings,
+                        enabled=bool(new_settings.get("enable_auto_push", False)),
+                    )
+                    if new_settings.get("enable_auto_push", False) and not sub_ok:
+                        st.error(L(ui_lang, f"自动推送订阅保存失败：{sub_msg}", f"Failed to save auto-push subscription: {sub_msg}"))
+                        return
                     st.session_state.session_openai_api_key = session_api_key.strip()
                     st.session_state.saved_settings = new_settings
                     save_browser_settings(new_settings)
@@ -2875,7 +3314,16 @@ def main() -> None:
                     st.session_state.last_worth_cards = None
                     st.session_state.last_fetch_note = ""
                     st.session_state.last_fetch_diag = {}
-                    st.success(msg)
+                    if new_settings.get("enable_auto_push", False):
+                        st.success(
+                            L(
+                                ui_lang,
+                                f"{msg} 自动推送订阅已更新（用户ID: {new_settings['subscriber_id'][:8]}）。",
+                                f"{msg} Auto-push subscription updated (user id: {new_settings['subscriber_id'][:8]}).",
+                            )
+                        )
+                    else:
+                        st.success(msg)
                 else:
                     st.error(msg)
         with cc:
@@ -2887,6 +3335,42 @@ def main() -> None:
             file_name="user_prefs.json",
             mime="application/json",
             disabled=busy,
+        )
+        tz_for_cron = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
+        hhmm_for_cron = normalize_hhmm(str(cur.get("daily_push_time", "09:00"))) or "09:00"
+        hh, mm = hhmm_for_cron.split(":")
+        if AUTO_PUSH_ENABLED:
+            if AUTO_PUSH_BACKEND == "postgres":
+                cron_line = "python daily_push.py --all-due"
+                st.caption(
+                    L(
+                        ui_lang,
+                        "多用户自动推送（推荐在 GitHub Actions/云调度中每5分钟运行一次）",
+                        "Multi-user auto push (recommended: run every 5 minutes in GitHub Actions/cloud scheduler)",
+                    )
+                )
+            else:
+                cron_line = f"* * * * * cd \"{Path.cwd()}\" && .venv/bin/python daily_push.py --all-due"
+                st.caption(
+                    L(
+                        ui_lang,
+                        "多用户自动推送（推荐每分钟扫描一次到点用户）",
+                        "Multi-user auto push (recommended: check due users every minute)",
+                    )
+                )
+        else:
+            cron_line = (
+                f"CRON_TZ={tz_for_cron} {int(mm)} {int(hh)} * * * "
+                f"cd \"{Path.cwd()}\" && .venv/bin/python daily_push.py --prefs user_prefs.json"
+            )
+            st.caption(L(ui_lang, "每日自动推送（单用户示例）", "Daily auto push (single-user example)"))
+        st.code(cron_line, language="bash")
+        st.caption(
+            L(
+                ui_lang,
+                f"你的订阅用户ID：{str(cur.get('subscriber_id', ''))[:12]}",
+                f"Your subscription user id: {str(cur.get('subscriber_id', ''))[:12]}",
+            )
         )
         if st.button(L(ui_lang, "清空抓取缓存", "Clear Fetch Cache"), disabled=busy):
             # Clear runtime/persistent fetch caches only; keep user settings intact.
