@@ -3297,14 +3297,19 @@ def main() -> None:
                 }
                 ok, msg = save_settings(new_settings)
                 if ok:
-                    sub_ok, sub_msg = upsert_auto_push_subscription(
-                        new_settings["subscriber_id"],
-                        new_settings,
-                        enabled=bool(new_settings.get("enable_auto_push", False)),
-                    )
-                    if new_settings.get("enable_auto_push", False) and not sub_ok:
-                        st.error(L(ui_lang, f"自动推送订阅保存失败：{sub_msg}", f"Failed to save auto-push subscription: {sub_msg}"))
-                        return
+                    requested_auto_push = bool(new_settings.get("enable_auto_push", False))
+                    sub_ok = True
+                    sub_msg = ""
+                    if requested_auto_push:
+                        sub_ok, sub_msg = upsert_auto_push_subscription(
+                            new_settings["subscriber_id"],
+                            new_settings,
+                            enabled=True,
+                        )
+                        if not sub_ok:
+                            # Keep normal settings, but do not mark auto-push as enabled when remote persistence failed.
+                            new_settings["enable_auto_push"] = False
+                            _fallback_ok, _fallback_msg = save_settings(new_settings)
                     st.session_state.session_openai_api_key = session_api_key.strip()
                     st.session_state.saved_settings = new_settings
                     save_browser_settings(new_settings)
@@ -3315,7 +3320,15 @@ def main() -> None:
                     st.session_state.last_worth_cards = None
                     st.session_state.last_fetch_note = ""
                     st.session_state.last_fetch_diag = {}
-                    if new_settings.get("enable_auto_push", False):
+                    if requested_auto_push and not sub_ok:
+                        st.warning(
+                            L(
+                                ui_lang,
+                                f"{msg} 其他设置已保存，但自动推送订阅保存失败：{sub_msg}",
+                                f"{msg} Other settings were saved, but auto-push subscription failed: {sub_msg}",
+                            )
+                        )
+                    elif new_settings.get("enable_auto_push", False):
                         st.success(
                             L(
                                 ui_lang,
