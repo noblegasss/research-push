@@ -1,52 +1,52 @@
-# Research Digest App 使用说明
+# Research Digest App Guide
 
-在线地址：`https://research-push.streamlit.app/`
+App URL: `https://research-push.streamlit.app/`
 
-这个 App 用来按期刊/关键词抓取新论文，自动去重，并生成可读的每日摘要；你也可以把结果一键推送到 Slack。
+This app discovers new papers by journals/keywords, deduplicates results, and builds a readable daily digest. You can also push results to Slack.
 
-## 1. 在 App 里怎么用
+## 1. How to Use the App
 
-1. 打开 App，先进入 `⚙ Settings`。
-2. 选择你关注的期刊（可多选）。
-3. 填写关键词（可选），并设置排除关键词（例如 `survey`）。
-4. 选择时间范围（如今天、最近 7 天或自定义）。
-5. 点击生成/刷新后查看结果。
-6. 在主页面查看：
-   - `Today Feed`：今天/当前时间窗内的论文列表
-   - `Worth Reading`：值得读（启用 AI 时会更完整）
+1. Open the app and go to `⚙ Settings`.
+2. Select journals you want to follow (multi-select supported).
+3. Add keywords (optional) and exclude keywords (for example, `survey`).
+4. Choose a time range (today, last 7 days, or custom).
+5. Generate/refresh to get results.
+6. Review outputs in:
+   - `Today Feed`: papers in the current time window
+   - `Worth Reading`: prioritized picks (more complete when AI is enabled)
 
-## 2. （可选）启用 AI 总结
+## 2. (Optional) Enable AI Summary
 
-1. 进入 `⚙ Settings`。
-2. 打开 **Use ChatGPT API**。
-3. 填入 **Session API Key**。
-4. 选择模型后保存。
+1. Go to `⚙ Settings`.
+2. Turn on **Use ChatGPT API**.
+3. Enter your **Session API Key**.
+4. Choose a model and save.
 
-未配置 API Key 时，App 仍可用，只是 AI 相关内容会降级或隐藏。
+Without an API key, the app still works, but AI-specific parts are hidden or downgraded.
 
-## 3. 在网页端使用 Slack 推送
+## 3. Use Slack Push in Web App
 
-### 3.1 先准备一个 Slack Webhook
+### 3.1 Prepare a Slack Webhook
 
-1. 访问：`https://api.slack.com/apps`
-2. 创建一个 Slack App，并开启 **Incoming Webhooks**。
-3. 添加到目标频道后，复制 Webhook URL（形如 `https://hooks.slack.com/services/...`）。
+1. Visit `https://api.slack.com/apps`
+2. Create a Slack app and enable **Incoming Webhooks**.
+3. Add it to a target channel, then copy the webhook URL (`https://hooks.slack.com/services/...`).
 
-### 3.2 在网页端接入 Webhook
+### 3.2 Connect Webhook in the App
 
-1. 回到 App 的 `⚙ Settings`。
-2. 打开 **Enable Webhook Push**。
-3. 粘贴刚才的 Webhook URL。
-4. 保存设置。
-5. 生成摘要后，点击 **Push to Webhook** 推送到 Slack。
+1. Go back to `⚙ Settings` in the app.
+2. Turn on **Enable Webhook Push**.
+3. Paste your webhook URL.
+4. Save settings.
+5. After generating a digest, click **Push to Webhook**.
 
-### 3.3 推送内容
+### 3.3 What Gets Pushed
 
-- 当日/当前筛选条件下的论文条目（含链接）
-- Worth Reading 摘要（有可用内容时）
+- Paper items in your current digest (with links)
+- Worth Reading summary (when available)
 
-## 4. 常见问题
+## 4. Troubleshooting
 
-- 没有抓到论文：先放宽时间范围，再减少筛选关键词。
-- 点了推送但 Slack 没消息：检查 Webhook URL 是否完整、频道权限是否正确。
-- 误泄露了 Webhook URL：立即在 Slack 里撤销并重新生成，再更新 App 设置。
+- No papers found: widen the time range and reduce keyword filters.
+- Slack received nothing: check webhook URL validity and channel permissions.
+- Webhook leaked: revoke/rotate it in Slack immediately, then update the app.
