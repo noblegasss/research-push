@@ -37,7 +37,7 @@
     "protocol only"
   ],
   "date_range_days": 1,
-  "max_papers": 20,
+  "max_papers": 0,
   "reading_level": "mixed",
   "ranking_weights": {
     "relevance": 0.35,
