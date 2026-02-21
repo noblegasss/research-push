@@ -35,7 +35,6 @@ jobs:
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           if [ -z "${AUTO_PUSH_DATABASE_URL}" ]; then
             echo "Missing GitHub secret: AUTO_PUSH_DATABASE_URL"

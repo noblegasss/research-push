@@ -1008,40 +1008,6 @@ def inject_styles() -> None:
             padding-top: 3.6rem;
           }
         }
-        .topbar {
-          border: 1px solid #d3dfeb;
-          background: rgba(255, 255, 255, 0.9);
-          border-radius: 16px;
-          padding: 0.78rem 1rem;
-          margin-bottom: 0.7rem;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 0.8rem;
-          box-shadow: 0 8px 20px rgba(16, 35, 54, 0.06);
-        }
-        .topbar-title {
-          font-weight: 700;
-          font-size: 0.94rem;
-          letter-spacing: 0.02em;
-          color: #11304a;
-          margin: 0;
-        }
-        .topbar-sub {
-          margin: 0;
-          font-size: 0.78rem;
-          color: var(--muted);
-        }
-        .topbar-pill {
-          border: 1px solid #cfe0f2;
-          background: linear-gradient(180deg, #f8fcff 0%, #eef5ff 100%);
-          color: #16456d;
-          border-radius: 999px;
-          padding: 0.22rem 0.7rem;
-          font-size: 0.74rem;
-          font-weight: 600;
-          white-space: nowrap;
-        }
         .hero {
           padding: 1.05rem 1.12rem;
           border-radius: 16px;
@@ -1063,15 +1029,6 @@ def inject_styles() -> None:
           margin: 0.35rem 0 0 0;
           font-size: 0.82rem;
           color: rgba(236, 248, 255, 0.93);
-        }
-        @media (max-width: 760px) {
-          .topbar {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          .topbar-pill {
-            align-self: flex-start;
-          }
         }
         .feed-title {
           font-size: 1.04rem;
@@ -2418,8 +2375,12 @@ def post_webhook(webhook_url: str, payload: dict[str, Any], lang: str = "zh") ->
             paper_lines: list[str] = []
             for i, p in enumerate(today_papers, start=1):
                 title = str(p.get("title", "")).strip()
+                venue = str(p.get("venue", "")).strip()
+                date = str(p.get("date", "")).strip()
                 link = str(p.get("link", "")).strip()
-                paper_lines.append(f"{i}. {title}" + (f" - {link}" if link else ""))
+                meta = ", ".join([x for x in [venue, date] if x])
+                head = f"{i}. {title}" + (f" ({meta})" if meta else "")
+                paper_lines.append(head + (f" - {link}" if link else ""))
             if not paper_lines:
                 paper_lines.append(L(lang, "（无论文）", "(No papers)"))
             text = "\n".join(
@@ -3079,19 +3040,9 @@ def main() -> None:
     inject_styles()
     init_auto_push_db()
     current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
-    app_title = L(current_lang, "Research Push 控制台", "Research Push Console")
-    app_subtitle = L(current_lang, "实时抓取 · 智能筛选 · 自动投递", "Live fetch · smart triage · auto delivery")
-    status_pill = L(current_lang, "多源联动中", "Multi-source online")
     feed_title = L(current_lang, "今日论文", "Research Feed")
     st.markdown(
         f"""
-        <div class="topbar">
-          <div>
-            <p class="topbar-title">{app_title}</p>
-            <p class="topbar-sub">{app_subtitle}</p>
-          </div>
-          <div class="topbar-pill">{status_pill}</div>
-        </div>
         <div class="hero">
           <h3 class="hero-title">{feed_title}</h3>
           <p class="hero-sub">{L(current_lang, "以最少噪音，持续跟踪高价值研究进展。", "Track high-value research with minimal noise.")}</p>
@@ -3212,128 +3163,159 @@ def main() -> None:
         smtp_host_b, smtp_port_b, smtp_user_b, smtp_password_b = get_backend_smtp_config()
         smtp_ready_b = all([smtp_host_b, smtp_user_b, smtp_password_b])
         lang_opt = cur.get("language", "zh")
-        cset1, cset2 = st.columns(2)
-        with cset1:
-            lang_labels = [L(lang_opt, "中文", "Chinese"), "English"]
-            language = st.selectbox(L(lang_opt, "语言", "Language"), lang_labels, index=0 if lang_opt == "zh" else 1)
-            ui_lang = "zh" if language == lang_labels[0] else "en"
-            selected_fields = st.multiselect(L(ui_lang, "领域", "Fields"), FIELD_OPTIONS, default=cur.get("fields", []))
-            custom_fields = st.text_input(L(ui_lang, "自定义领域", "Custom Fields"), cur.get("custom_fields", ""))
-            selected_journals = st.multiselect(L(ui_lang, "期刊", "Journals"), JOURNAL_OPTIONS, default=cur.get("journals", []))
-            custom_journals = st.text_input(L(ui_lang, "自定义期刊", "Custom Journals"), cur.get("custom_journals", ""))
-            strict_journal_only = st.toggle(L(ui_lang, "严格期刊匹配", "Strict journal match"), value=bool(cur.get("strict_journal_only", True)))
-            keywords = st.text_input(L(ui_lang, "关键词", "Keywords"), cur.get("keywords", ""))
-            exclude = st.text_input(L(ui_lang, "排除关键词", "Exclude Keywords"), cur.get("exclude_keywords", "survey"))
-            schedule_options = {
-                "daily": L(ui_lang, "每天", "Daily"),
-                "weekly_monday": L(ui_lang, "每周一", "Weekly (Monday)"),
-                "custom": L(ui_lang, "自定义", "Custom"),
-            }
-            saved_schedule = str(cur.get("push_schedule", "daily")).lower()
-            if saved_schedule == "weekly (monday)":
-                saved_schedule = "weekly_monday"
-            if saved_schedule not in schedule_options:
-                saved_schedule = "daily"
-            schedule_keys = ["daily", "weekly_monday", "custom"]
-            schedule_labels = [schedule_options[k] for k in schedule_keys]
-            schedule_label = st.selectbox(
-                L(ui_lang, "推送周期", "Push Schedule"),
-                schedule_labels,
-                index=schedule_keys.index(saved_schedule),
-            )
-            push_schedule = schedule_keys[schedule_labels.index(schedule_label)]
-            custom_days = st.slider(L(ui_lang, "自定义天数", "Custom range days"), 1, 60, int(cur.get("custom_days", 7)), 1, disabled=push_schedule != "custom")
-            max_papers = st.slider(
-                L(ui_lang, "最多论文数（0=全部）", "Max Papers (0=All)"),
-                0,
-                50,
-                int(cur.get("max_papers", 0)),
-                1,
-            )
-            layout_options = {
-                "expanded": L(ui_lang, "舒展单列", "Expanded List"),
-                "compact": L(ui_lang, "紧凑单列", "Compact List"),
-                "board2": L(ui_lang, "双列看板", "Board (2 columns)"),
-                "board3": L(ui_lang, "三列看板", "Board (3 columns)"),
-            }
-            saved_layout = str(cur.get("layout_mode", "board2"))
-            legacy_layout = {"舒展单列": "expanded", "紧凑单列": "compact", "Board-2列": "board2", "Board-3列": "board3"}
-            saved_layout = legacy_layout.get(saved_layout, saved_layout)
-            if saved_layout not in layout_options:
-                saved_layout = "board2"
-            layout_keys = ["expanded", "compact", "board2", "board3"]
-            layout_labels = [layout_options[k] for k in layout_keys]
-            layout_label = st.selectbox(
-                L(ui_lang, "信息流布局", "Feed Layout"),
-                layout_labels,
-                index=layout_keys.index(saved_layout),
-            )
-            layout_mode = layout_keys[layout_labels.index(layout_label)]
-        with cset2:
-            proxy_prefix = st.text_input(L(ui_lang, "学校代理前缀", "Institution Proxy Prefix"), cur.get("proxy_prefix", ""))
-            enable_auto_push = st.toggle(
-                L(ui_lang, "启用自动推送订阅", "Enable Auto Push Subscription"),
-                value=bool(cur.get("enable_auto_push", False)),
-                help=L(ui_lang, "开启后可被后台定时任务按用户独立推送。", "When enabled, backend scheduler can push per user."),
-                disabled=not AUTO_PUSH_ENABLED,
-            )
-            if not AUTO_PUSH_ENABLED:
-                reason = auto_push_backend_reason()
-                st.caption(
-                    L(
-                        ui_lang,
-                        f"自动推送订阅存储未启用：{reason or '请配置 AUTO_PUSH_DATABASE_URL 或 SERVER_PERSISTENCE=1。'}",
-                        f"Auto-push subscription storage is disabled: {reason or 'Configure AUTO_PUSH_DATABASE_URL or SERVER_PERSISTENCE=1.'}",
-                    )
+        lang_labels = [L(lang_opt, "中文", "Chinese"), "English"]
+        language = st.selectbox(L(lang_opt, "语言", "Language"), lang_labels, index=0 if lang_opt == "zh" else 1)
+        ui_lang = "zh" if language == lang_labels[0] else "en"
+
+        selected_fields = normalize_str_list_input(cur.get("fields", []))
+        custom_fields = str(cur.get("custom_fields", ""))
+        selected_journals = normalize_str_list_input(cur.get("journals", []))
+        custom_journals = str(cur.get("custom_journals", ""))
+        strict_journal_only = bool(cur.get("strict_journal_only", True))
+        keywords = str(cur.get("keywords", ""))
+        exclude = str(cur.get("exclude_keywords", "survey"))
+        push_schedule = normalize_push_schedule(str(cur.get("push_schedule", "daily")))
+        custom_days = int(cur.get("custom_days", 7))
+        max_papers = int(cur.get("max_papers", 0))
+        saved_layout = str(cur.get("layout_mode", "board2"))
+        proxy_prefix = str(cur.get("proxy_prefix", ""))
+        enable_auto_push = bool(cur.get("enable_auto_push", False))
+        daily_push_time = str(cur.get("daily_push_time", "09:00"))
+        saved_tz = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
+        enable_webhook_push = bool(cur.get("enable_webhook_push", False))
+        webhook_url = str(cur.get("webhook_url", ""))
+        email_to = str(cur.get("email_to", ""))
+        auto_send_email = bool(cur.get("auto_send_email", False))
+        use_api = bool(cur.get("use_api", False))
+        session_api_key = str(st.session_state.get("session_openai_api_key", ""))
+        api_model = str(cur.get("api_model", "gpt-4.1-mini"))
+        deep_read_mode = bool(cur.get("deep_read_mode", False))
+        deep_read_limit = int(cur.get("deep_read_limit", 5))
+        worth_count = int(cur.get("worth_count", 4))
+        auto_refresh_on_load = bool(cur.get("auto_refresh_on_load", False))
+
+        schedule_options = {
+            "daily": L(ui_lang, "每天", "Daily"),
+            "weekly_monday": L(ui_lang, "每周一", "Weekly (Monday)"),
+            "custom": L(ui_lang, "自定义", "Custom"),
+        }
+        schedule_keys = ["daily", "weekly_monday", "custom"]
+        layout_options = {
+            "expanded": L(ui_lang, "舒展单列", "Expanded List"),
+            "compact": L(ui_lang, "紧凑单列", "Compact List"),
+            "board2": L(ui_lang, "双列看板", "Board (2 columns)"),
+            "board3": L(ui_lang, "三列看板", "Board (3 columns)"),
+        }
+        legacy_layout = {"舒展单列": "expanded", "紧凑单列": "compact", "Board-2列": "board2", "Board-3列": "board3"}
+        saved_layout = legacy_layout.get(saved_layout, saved_layout)
+        if saved_layout not in layout_options:
+            saved_layout = "board2"
+        layout_keys = ["expanded", "compact", "board2", "board3"]
+
+        tab_general, tab_delivery, tab_ai = st.tabs(
+            [L(ui_lang, "基础", "General"), L(ui_lang, "推送", "Delivery"), L(ui_lang, "AI", "AI")]
+        )
+        with tab_general:
+            st.caption(L(ui_lang, "订阅范围与展示策略", "Scope and display strategy"))
+            g1, g2 = st.columns(2)
+            with g1:
+                selected_fields = st.multiselect(L(ui_lang, "领域", "Fields"), FIELD_OPTIONS, default=selected_fields)
+                custom_fields = st.text_input(L(ui_lang, "自定义领域", "Custom Fields"), custom_fields)
+                selected_journals = st.multiselect(L(ui_lang, "期刊", "Journals"), JOURNAL_OPTIONS, default=selected_journals)
+                custom_journals = st.text_input(L(ui_lang, "自定义期刊", "Custom Journals"), custom_journals)
+                strict_journal_only = st.toggle(L(ui_lang, "严格期刊匹配", "Strict journal match"), value=strict_journal_only)
+            with g2:
+                keywords = st.text_input(L(ui_lang, "关键词", "Keywords"), keywords)
+                exclude = st.text_input(L(ui_lang, "排除关键词", "Exclude Keywords"), exclude)
+                schedule_label = st.selectbox(
+                    L(ui_lang, "推送周期", "Push Schedule"),
+                    [schedule_options[k] for k in schedule_keys],
+                    index=schedule_keys.index(push_schedule),
                 )
-            daily_push_time = st.text_input(
-                L(ui_lang, "每日推送时间（HH:MM）", "Daily Push Time (HH:MM)"),
-                value=str(cur.get("daily_push_time", "09:00")),
-                help=L(ui_lang, "用于外部定时任务（cron/云调度）。", "Used by external scheduler (cron/cloud scheduler)."),
-            )
-            saved_tz = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
-            tz_options = list(COMMON_TIMEZONE_OPTIONS)
-            if saved_tz not in tz_options:
-                tz_options = [saved_tz] + tz_options
-            push_timezone = st.selectbox(
-                L(ui_lang, "推送时区（IANA）", "Push Timezone (IANA)"),
-                tz_options,
-                index=tz_options.index(saved_tz),
-                help=L(ui_lang, "选择推送时区。", "Select a timezone for auto push."),
-            )
-            enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=bool(cur.get("enable_webhook_push", False)))
-            webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), cur.get("webhook_url", ""), disabled=not enable_webhook_push)
-            email_to = st.text_input(L(ui_lang, "收件邮箱", "Email To"), cur.get("email_to", ""))
-            auto_send_email = st.toggle(
-                L(ui_lang, "自动发送邮件", "Auto send email"),
-                value=bool(cur.get("auto_send_email", False)),
-                disabled=not smtp_ready_b,
-            )
-            st.caption(L(ui_lang, "邮箱发送由后台 SMTP 配置统一管理。", "Email delivery uses backend SMTP configuration."))
-            if not smtp_ready_b:
-                st.caption(
-                    L(
-                        ui_lang,
-                        "后台 SMTP 未配置（SMTP_HOST/PORT/USER/PASSWORD），自动发邮件不可用。",
-                        "Backend SMTP is not configured (SMTP_HOST/PORT/USER/PASSWORD), auto-email is unavailable.",
-                    )
+                push_schedule = schedule_keys[[schedule_options[k] for k in schedule_keys].index(schedule_label)]
+                custom_days = st.slider(L(ui_lang, "自定义天数", "Custom range days"), 1, 60, custom_days, 1, disabled=push_schedule != "custom")
+                max_papers = st.slider(L(ui_lang, "最多论文数（0=全部）", "Max Papers (0=All)"), 0, 50, max_papers, 1)
+                layout_label = st.selectbox(
+                    L(ui_lang, "信息流布局", "Feed Layout"),
+                    [layout_options[k] for k in layout_keys],
+                    index=layout_keys.index(saved_layout),
                 )
-            use_api = st.toggle(L(ui_lang, "启用 ChatGPT API", "Use ChatGPT API"), value=bool(cur.get("use_api", False)))
-            session_api_key = st.text_input(
-                L(ui_lang, "会话 API Key", "Session API Key"),
-                value=str(st.session_state.get("session_openai_api_key", "")),
-                type="password",
-                help=L(
-                    ui_lang,
-                    "会话有效；关闭应用后需重新填写。推荐生产环境用 Secrets。",
-                    "Session-only; you need to re-enter after restart. Use Secrets for production.",
-                ),
-            )
-            api_model = st.text_input(L(ui_lang, "模型", "Model"), cur.get("api_model", "gpt-4.1-mini"), disabled=not use_api)
-            deep_read_mode = st.toggle(L(ui_lang, "可访问时读取全文", "AI read full text when possible"), value=bool(cur.get("deep_read_mode", False)), disabled=not use_api)
-            deep_read_limit = st.slider(L(ui_lang, "全文阅读篇数", "Full-text read count"), 1, 10, int(cur.get("deep_read_limit", 5)), 1, disabled=not use_api)
-            worth_count = st.slider(L(ui_lang, "值得读数量", "Worth Reading count"), 2, 8, int(cur.get("worth_count", 4)), 1)
-            auto_refresh_on_load = st.toggle(L(ui_lang, "自动刷新（加载即运行）", "Auto refresh with saved settings"), value=bool(cur.get("auto_refresh_on_load", False)))
+                layout_mode = layout_keys[[layout_options[k] for k in layout_keys].index(layout_label)]
+                proxy_prefix = st.text_input(L(ui_lang, "学校代理前缀", "Institution Proxy Prefix"), proxy_prefix)
+
+        with tab_delivery:
+            st.caption(L(ui_lang, "自动推送与投递渠道", "Automation and delivery channels"))
+            d1, d2 = st.columns(2)
+            with d1:
+                enable_auto_push = st.toggle(
+                    L(ui_lang, "启用自动推送订阅", "Enable Auto Push Subscription"),
+                    value=enable_auto_push,
+                    help=L(ui_lang, "开启后可被后台定时任务按用户独立推送。", "When enabled, backend scheduler can push per user."),
+                    disabled=not AUTO_PUSH_ENABLED,
+                )
+                if not AUTO_PUSH_ENABLED:
+                    reason = auto_push_backend_reason()
+                    st.caption(
+                        L(
+                            ui_lang,
+                            f"自动推送订阅存储未启用：{reason or '请配置 AUTO_PUSH_DATABASE_URL 或 SERVER_PERSISTENCE=1。'}",
+                            f"Auto-push subscription storage is disabled: {reason or 'Configure AUTO_PUSH_DATABASE_URL or SERVER_PERSISTENCE=1.'}",
+                        )
+                    )
+                daily_push_time = st.text_input(
+                    L(ui_lang, "每日推送时间（HH:MM）", "Daily Push Time (HH:MM)"),
+                    value=daily_push_time,
+                    help=L(ui_lang, "用于外部定时任务（cron/云调度）。", "Used by external scheduler (cron/cloud scheduler)."),
+                )
+                tz_options = list(COMMON_TIMEZONE_OPTIONS)
+                if saved_tz not in tz_options:
+                    tz_options = [saved_tz] + tz_options
+                push_timezone = st.selectbox(
+                    L(ui_lang, "推送时区（IANA）", "Push Timezone (IANA)"),
+                    tz_options,
+                    index=tz_options.index(saved_tz),
+                    help=L(ui_lang, "选择推送时区。", "Select a timezone for auto push."),
+                )
+            with d2:
+                enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=enable_webhook_push)
+                webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), webhook_url, disabled=not enable_webhook_push)
+                email_to = st.text_input(L(ui_lang, "收件邮箱", "Email To"), email_to)
+                auto_send_email = st.toggle(
+                    L(ui_lang, "自动发送邮件", "Auto send email"),
+                    value=auto_send_email,
+                    disabled=not smtp_ready_b,
+                )
+                st.caption(L(ui_lang, "邮箱发送由后台 SMTP 配置统一管理。", "Email delivery uses backend SMTP configuration."))
+                if not smtp_ready_b:
+                    st.caption(
+                        L(
+                            ui_lang,
+                            "后台 SMTP 未配置（SMTP_HOST/PORT/USER/PASSWORD），自动发邮件不可用。",
+                            "Backend SMTP is not configured (SMTP_HOST/PORT/USER/PASSWORD), auto-email is unavailable.",
+                        )
+                    )
+
+        with tab_ai:
+            st.caption(L(ui_lang, "模型与内容深读策略", "Model and deep-reading strategy"))
+            a1, a2 = st.columns(2)
+            with a1:
+                use_api = st.toggle(L(ui_lang, "启用 ChatGPT API", "Use ChatGPT API"), value=use_api)
+                session_api_key = st.text_input(
+                    L(ui_lang, "会话 API Key", "Session API Key"),
+                    value=session_api_key,
+                    type="password",
+                    help=L(
+                        ui_lang,
+                        "会话有效；关闭应用后需重新填写。推荐生产环境用 Secrets。",
+                        "Session-only; you need to re-enter after restart. Use Secrets for production.",
+                    ),
+                )
+                api_model = st.text_input(L(ui_lang, "模型", "Model"), api_model, disabled=not use_api)
+            with a2:
+                deep_read_mode = st.toggle(L(ui_lang, "可访问时读取全文", "AI read full text when possible"), value=deep_read_mode, disabled=not use_api)
+                deep_read_limit = st.slider(L(ui_lang, "全文阅读篇数", "Full-text read count"), 1, 10, deep_read_limit, 1, disabled=not use_api)
+                worth_count = st.slider(L(ui_lang, "值得读数量", "Worth Reading count"), 2, 8, worth_count, 1)
+                auto_refresh_on_load = st.toggle(L(ui_lang, "自动刷新（加载即运行）", "Auto refresh with saved settings"), value=auto_refresh_on_load)
 
         cs, cc = st.columns([1, 1])
         with cs:
