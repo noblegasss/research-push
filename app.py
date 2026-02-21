@@ -1945,6 +1945,14 @@ def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], 
                             push_time=EXCLUDED.push_time,
                             timezone=EXCLUDED.timezone,
                             settings_json=EXCLUDED.settings_json,
+                            last_run_local_date=CASE
+                                WHEN auto_push_subscriptions.schedule <> EXCLUDED.schedule
+                                  OR auto_push_subscriptions.custom_days <> EXCLUDED.custom_days
+                                  OR auto_push_subscriptions.push_time <> EXCLUDED.push_time
+                                  OR auto_push_subscriptions.timezone <> EXCLUDED.timezone
+                                THEN ''
+                                ELSE auto_push_subscriptions.last_run_local_date
+                            END,
                             updated_at_utc=EXCLUDED.updated_at_utc
                         """,
                         params,
@@ -1968,6 +1976,14 @@ def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], 
                     push_time=excluded.push_time,
                     timezone=excluded.timezone,
                     settings_json=excluded.settings_json,
+                    last_run_local_date=CASE
+                        WHEN auto_push_subscriptions.schedule <> excluded.schedule
+                          OR auto_push_subscriptions.custom_days <> excluded.custom_days
+                          OR auto_push_subscriptions.push_time <> excluded.push_time
+                          OR auto_push_subscriptions.timezone <> excluded.timezone
+                        THEN ''
+                        ELSE auto_push_subscriptions.last_run_local_date
+                    END,
                     updated_at_utc=excluded.updated_at_utc
                 """,
                 params,
