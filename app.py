@@ -2,12 +2,10 @@ import html
 import json
 import os
 import re
-import smtplib
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -2433,63 +2431,6 @@ def post_webhook(webhook_url: str, payload: dict[str, Any], lang: str = "zh") ->
         return False, L(lang, f"推送异常：{exc}", f"Push error: {exc}")
 
 
-def format_email_body(digest: dict[str, Any], push_text: dict[str, str], lang: str = "zh") -> str:
-    lines = []
-    header = digest.get("digest_header", {})
-    stats = header.get("stats", {})
-    lines.append(L(lang, "Research Digest 每日推送", "Research Digest Daily Update"))
-    lines.append(L(lang, f"日期：{now_utc().strftime('%Y-%m-%d')}", f"Date: {now_utc().strftime('%Y-%m-%d')}"))
-    lines.append(L(lang, f"覆盖范围：{header.get('coverage', '')}", f"Coverage: {header.get('coverage', '')}"))
-    lines.append(
-        L(
-            lang,
-            f"统计：抓取 {stats.get('fetched_count', 0)} | 去重后 {stats.get('deduplicated_count', 0)} | 入选 {stats.get('selected_count', 0)}",
-            f"Stats: fetched {stats.get('fetched_count', 0)} | deduped {stats.get('deduplicated_count', 0)} | selected {stats.get('selected_count', 0)}",
-        )
-    )
-    lines.append("")
-    lines.append(L(lang, "【今日新论文总结】", "[Today's New Paper Summary]"))
-    lines.append(push_text.get("today_new_summary", ""))
-    lines.append("")
-    lines.append(L(lang, "【值得读总结】", "[Worth Reading Summary]"))
-    lines.append(push_text.get("worth_reading_summary", ""))
-    lines.append("")
-    lines.append(L(lang, "【优先推荐】", "[Top Picks]"))
-    for i, p in enumerate(digest.get("top_picks", []), start=1):
-        lines.append(f"{i}. {p.get('title', '')}")
-        lines.append(L(lang, f"   期刊/日期：{p.get('venue', '')} | {p.get('date', '')}", f"   Venue/Date: {p.get('venue', '')} | {p.get('date', '')}"))
-        lines.append(L(lang, f"   价值判断：{p.get('value_assessment', '')}", f"   Value: {p.get('value_assessment', '')}"))
-        lines.append(L(lang, f"   链接：{p.get('link', '')}", f"   Link: {p.get('link', '')}"))
-    return "\n".join(lines)
-
-
-def send_email_digest(
-    smtp_host: str,
-    smtp_port: int,
-    smtp_user: str,
-    smtp_password: str,
-    to_email: str,
-    subject: str,
-    body: str,
-    lang: str = "zh",
-) -> tuple[bool, str]:
-    if not smtp_host.strip() or not smtp_user.strip() or not smtp_password.strip() or not to_email.strip():
-        return False, L(lang, "邮件配置不完整（SMTP host/user/password/to）", "SMTP config incomplete (host/user/password/to)")
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = smtp_user
-        msg["To"] = to_email
-        msg.set_content(body)
-        with smtplib.SMTP(smtp_host.strip(), smtp_port, timeout=20) as server:
-            server.starttls()
-            server.login(smtp_user.strip(), smtp_password.strip())
-            server.send_message(msg)
-        return True, L(lang, "邮件发送成功", "Email sent successfully")
-    except Exception as exc:
-        return False, L(lang, f"邮件发送失败：{exc}", f"Email send failed: {exc}")
-
-
 def card(item: dict[str, Any], prefs: dict[str, Any]) -> dict[str, Any]:
     p: Paper = item["paper"]
     sc = item["scores"]
@@ -2858,31 +2799,6 @@ def get_backend_openai_api_key() -> str:
     return (key or os.getenv("OPENAI_API_KEY", "")).strip()
 
 
-def get_backend_smtp_config() -> tuple[str, int, str, str]:
-    host = ""
-    port = 587
-    user = ""
-    password = ""
-    if not PUBLIC_MODE:
-        try:
-            host = str(st.secrets.get("SMTP_HOST", "") or "")
-            port = int(st.secrets.get("SMTP_PORT", 587) or 587)
-            user = str(st.secrets.get("SMTP_USER", "") or "")
-            password = str(st.secrets.get("SMTP_PASSWORD", "") or "")
-        except StreamlitSecretNotFoundError:
-            pass
-        except Exception:
-            pass
-    host = host or os.getenv("SMTP_HOST", "")
-    try:
-        port = int(os.getenv("SMTP_PORT", str(port)) or port)
-    except Exception:
-        port = 587
-    user = user or os.getenv("SMTP_USER", "")
-    password = password or os.getenv("SMTP_PASSWORD", "")
-    return host.strip(), int(port), user.strip(), password.strip()
-
-
 def fetch_candidates_once(prefs: dict[str, Any], days: int, strict_journal_only: bool) -> tuple[list[Paper], dict[str, int]]:
     kws = prefs.get("keywords", [])
     fields = prefs.get("fields", [])
@@ -3097,8 +3013,6 @@ def main() -> None:
         "layout_mode": "board2",
         "enable_webhook_push": False,
         "webhook_url": "",
-        "email_to": "",
-        "auto_send_email": False,
         "enable_auto_push": False,
         "daily_push_time": "09:00",
         "push_timezone": os.getenv("APP_TIMEZONE", "America/New_York").strip() or "America/New_York",
@@ -3120,10 +3034,6 @@ def main() -> None:
             merged["subscriber_id"] = uuid4().hex
         merged["journals"] = normalize_str_list_input(merged.get("journals", []))
         merged["fields"] = normalize_str_list_input(merged.get("fields", []))
-        smtp_host_init, smtp_port_init, smtp_user_init, smtp_password_init = get_backend_smtp_config()
-        smtp_ready_init = all([smtp_host_init, smtp_user_init, smtp_password_init])
-        if not smtp_ready_init:
-            merged["auto_send_email"] = False
         st.session_state.saved_settings = merged
     if "browser_settings_try_count" not in st.session_state:
         st.session_state.browser_settings_try_count = 0
@@ -3155,8 +3065,6 @@ def main() -> None:
         st.session_state.last_fetch_note = ""
     if "last_fetch_diag" not in st.session_state:
         st.session_state.last_fetch_diag = {}
-    if "last_auto_email_sig" not in st.session_state:
-        st.session_state.last_auto_email_sig = ""
     if (
         streamlit_js_eval is not None
         and not st.session_state.get("browser_settings_synced", False)
@@ -3185,8 +3093,6 @@ def main() -> None:
     def settings_modal() -> None:
         cur = st.session_state.saved_settings
         busy = bool(st.session_state.get("is_generating", False))
-        smtp_host_b, smtp_port_b, smtp_user_b, smtp_password_b = get_backend_smtp_config()
-        smtp_ready_b = all([smtp_host_b, smtp_user_b, smtp_password_b])
         lang_opt = cur.get("language", "zh")
         lang_labels = [L(lang_opt, "中文", "Chinese"), "English"]
         language = st.selectbox(L(lang_opt, "语言", "Language"), lang_labels, index=0 if lang_opt == "zh" else 1)
@@ -3209,8 +3115,6 @@ def main() -> None:
         saved_tz = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
         enable_webhook_push = bool(cur.get("enable_webhook_push", False))
         webhook_url = str(cur.get("webhook_url", ""))
-        email_to = str(cur.get("email_to", ""))
-        auto_send_email = bool(cur.get("auto_send_email", False))
         use_api = bool(cur.get("use_api", False))
         session_api_key = str(st.session_state.get("session_openai_api_key", ""))
         api_model = str(cur.get("api_model", "gpt-4.1-mini"))
@@ -3307,21 +3211,6 @@ def main() -> None:
             with d2:
                 enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=enable_webhook_push)
                 webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), webhook_url, disabled=not enable_webhook_push)
-                email_to = st.text_input(L(ui_lang, "收件邮箱", "Email To"), email_to)
-                auto_send_email = st.toggle(
-                    L(ui_lang, "自动发送邮件", "Auto send email"),
-                    value=auto_send_email,
-                    disabled=not smtp_ready_b,
-                )
-                st.caption(L(ui_lang, "邮箱发送由后台 SMTP 配置统一管理。", "Email delivery uses backend SMTP configuration."))
-                if not smtp_ready_b:
-                    st.caption(
-                        L(
-                            ui_lang,
-                            "后台 SMTP 未配置（SMTP_HOST/PORT/USER/PASSWORD），自动发邮件不可用。",
-                            "Backend SMTP is not configured (SMTP_HOST/PORT/USER/PASSWORD), auto-email is unavailable.",
-                        )
-                    )
 
         with tab_ai:
             st.caption(L(ui_lang, "模型与内容深读策略", "Model and deep-reading strategy"))
@@ -3365,13 +3254,12 @@ def main() -> None:
                     return
                 if enable_auto_push:
                     has_webhook_target = bool(enable_webhook_push and webhook_url_final)
-                    has_email_target = bool(auto_send_email and email_to.strip())
-                    if not has_webhook_target and not has_email_target:
+                    if not has_webhook_target:
                         st.error(
                             L(
                                 ui_lang,
-                                "已启用自动推送订阅，但没有可用推送目标。请配置 Webhook 或开启自动邮件并填写收件邮箱。",
-                                "Auto push is enabled but no delivery target is configured. Set webhook or auto-email recipient.",
+                                "已启用自动推送订阅，但没有可用推送目标。请配置 Webhook。",
+                                "Auto push is enabled but no delivery target is configured. Set a webhook.",
                             )
                         )
                         return
@@ -3396,8 +3284,6 @@ def main() -> None:
                     "layout_mode": layout_mode,
                     "enable_webhook_push": bool(enable_webhook_push and bool(webhook_url_final)),
                     "webhook_url": webhook_url_final,
-                    "email_to": email_to,
-                    "auto_send_email": bool(auto_send_email and smtp_ready_b),
                     "enable_auto_push": bool(enable_auto_push and AUTO_PUSH_ENABLED),
                     "daily_push_time": daily_push_time_norm,
                     "push_timezone": push_timezone_norm,
@@ -3533,9 +3419,6 @@ def main() -> None:
                 "- 推送无消息：检查 URL 是否有效、频道权限是否允许机器人发言。\n"
                 "- 值得读为空：需开启 ChatGPT API 并填写会话 API Key。\n"
                 "\n"
-                "【邮件说明】\n"
-                "- 前端只需要填收件邮箱；SMTP 由后台配置。\n"
-                "\n"
                 "【隐私说明】\n"
                 "- 会话模式下 API Key 仅会话有效，不会保存到服务器。",
                 "[Quick Start]\n"
@@ -3553,9 +3436,6 @@ def main() -> None:
                 "- Empty URL: save a valid Webhook URL in Settings first.\n"
                 "- No message delivered: verify webhook validity and channel bot permissions.\n"
                 "- Empty Worth Reading: enable ChatGPT API and set a session API key.\n"
-                "\n"
-                "[Email]\n"
-                "- Frontend only needs recipient email; SMTP is configured on backend.\n"
                 "\n"
                 "[Privacy]\n"
                 "- In session mode, API key is session-only and never persisted on server.",
@@ -3615,10 +3495,6 @@ def main() -> None:
     enable_webhook_push = bool(s.get("enable_webhook_push", False))
     proxy_prefix = s.get("proxy_prefix", "")
     webhook_url = s.get("webhook_url", "")
-    email_to = s.get("email_to", "")
-    smtp_host, smtp_port, smtp_user, smtp_password = get_backend_smtp_config()
-    smtp_ready = all([smtp_host, smtp_user, smtp_password])
-    auto_send_email = bool(s.get("auto_send_email", False))
     use_api = bool(s.get("use_api", False))
     api_model = s.get("api_model", "gpt-4.1-mini")
     deep_read_mode = bool(s.get("deep_read_mode", False))
@@ -3947,78 +3823,31 @@ def main() -> None:
                 )
             )
 
-        email_body = format_email_body(digest, push_text, lang=lang)
-        digest_sig = json.dumps(digest, ensure_ascii=False, sort_keys=True)
-        st.markdown(f"<p class='toolbar-title'>{L(lang, '推送与发送', 'Delivery')}</p>", unsafe_allow_html=True)
-        action_col1, action_col2 = st.columns(2)
-        with action_col1:
-            push_clicked = st.button(
-                L(lang, "推送到 Webhook", "Push to Webhook"),
-                disabled=bool(st.session_state.get("is_generating", False)) or (not enable_webhook_push),
-            )
-            if push_clicked:
-                if not webhook_url.strip():
-                    st.error(L(lang, "Webhook URL 为空，请在 ⚙ Settings 中填写 Webhook URL 并点击 Save Settings。", "Webhook URL is empty. Fill it in ⚙ Settings and click Save Settings."))
-                else:
-                    ok, msg = post_webhook(
-                        webhook_url,
-                        {
-                            "date": now_utc().strftime("%Y-%m-%d"),
-                            "today_new_summary": push_text["today_new_summary"],
-                            "worth_reading_summary": push_text["worth_reading_summary"],
-                            "digest": digest,
-                        },
-                        lang=lang,
-                    )
-                    if ok:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
-        with action_col2:
-            send_clicked = st.button(
-                L(lang, "发送到邮箱", "Send Email"),
-                disabled=bool(st.session_state.get("is_generating", False)) or (not smtp_ready),
-            )
-            if send_clicked:
-                ok, msg = send_email_digest(
-                    smtp_host=smtp_host,
-                    smtp_port=int(smtp_port),
-                    smtp_user=smtp_user,
-                    smtp_password=smtp_password,
-                    to_email=email_to,
-                    subject=f"Research Digest {now_utc().strftime('%Y-%m-%d')}",
-                    body=email_body,
+        st.markdown(f"<p class='toolbar-title'>{L(lang, '推送', 'Push')}</p>", unsafe_allow_html=True)
+        push_clicked = st.button(
+            L(lang, "推送到 Webhook", "Push to Webhook"),
+            disabled=bool(st.session_state.get("is_generating", False)) or (not enable_webhook_push),
+        )
+        if push_clicked:
+            if not webhook_url.strip():
+                st.error(L(lang, "Webhook URL 为空，请在 ⚙ Settings 中填写 Webhook URL 并点击 Save Settings。", "Webhook URL is empty. Fill it in ⚙ Settings and click Save Settings."))
+            else:
+                ok, msg = post_webhook(
+                    webhook_url,
+                    {
+                        "date": now_utc().strftime("%Y-%m-%d"),
+                        "today_new_summary": push_text["today_new_summary"],
+                        "worth_reading_summary": push_text["worth_reading_summary"],
+                        "digest": digest,
+                    },
                     lang=lang,
                 )
                 if ok:
                     st.success(msg)
                 else:
                     st.error(msg)
-        if not smtp_ready:
-            st.caption(L(lang, "后台未配置 SMTP，邮箱发送暂不可用。", "Backend SMTP is not configured, so email delivery is unavailable."))
         if not enable_webhook_push:
             st.caption(L(lang, "Webhook 未启用，可在设置中开启。", "Webhook is disabled. Enable it in Settings."))
-        if auto_send_email:
-            if st.session_state.get("last_auto_email_sig", "") == digest_sig:
-                pass
-            elif smtp_ready and email_to.strip():
-                ok, msg = send_email_digest(
-                    smtp_host=smtp_host,
-                    smtp_port=int(smtp_port),
-                    smtp_user=smtp_user,
-                    smtp_password=smtp_password,
-                    to_email=email_to,
-                    subject=f"Research Digest {now_utc().strftime('%Y-%m-%d')}",
-                    body=email_body,
-                    lang=lang,
-                )
-                if ok:
-                    st.session_state.last_auto_email_sig = digest_sig
-                    st.success(msg)
-                else:
-                    st.error(msg)
-            else:
-                st.warning(L(lang, "自动发邮件已开启，但收件邮箱或后台 SMTP 配置不完整。", "Auto email is enabled, but recipient email or backend SMTP config is incomplete."))
 
         tab_today, tab_worth, tab_insights = st.tabs(
             [L(lang, "今日Feed", "Today Feed"), L(lang, "值得读", "Worth Reading"), L(lang, "趋势洞察", "Insights")]

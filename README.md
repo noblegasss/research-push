@@ -1,139 +1,52 @@
-# Research Digest App
+# Research Digest App 使用说明
 
-A Streamlit app that discovers new papers from selected journals/topics, de-duplicates results, enriches abstracts, and generates readable daily digests with optional AI-enhanced summaries.
+在线地址：`https://research-push.streamlit.app/`
 
-Live app: https://research-push.streamlit.app/
+这个 App 用来按期刊/关键词抓取新论文，自动去重，并生成可读的每日摘要；你也可以把结果一键推送到 Slack。
 
-## Features
+## 1. 在 App 里怎么用
 
-- Journal-first discovery with multi-select support.
-- Keyword/field filtering and exclude-keyword filtering.
-- De-duplication by identifier (DOI/PMID/arXiv), with title/author/year fallback.
-- Daily/weekly/custom time windows.
-- Two primary content tabs:
-  - Today Feed
-  - Worth Reading (AI-selected when API is enabled)
-- Journal-grouped paper feed with collapsible sections.
-- Collapsible full abstract on each paper card.
-- Optional AI summary enhancement (OpenAI API).
-- Slack-compatible webhook push.
-- Optional email delivery (frontend only asks for recipient email; SMTP is backend-managed).
-- Bilingual UI support (Chinese/English).
+1. 打开 App，先进入 `⚙ Settings`。
+2. 选择你关注的期刊（可多选）。
+3. 填写关键词（可选），并设置排除关键词（例如 `survey`）。
+4. 选择时间范围（如今天、最近 7 天或自定义）。
+5. 点击生成/刷新后查看结果。
+6. 在主页面查看：
+   - `Today Feed`：今天/当前时间窗内的论文列表
+   - `Worth Reading`：值得读（启用 AI 时会更完整）
 
-## Project Structure
+## 2. （可选）启用 AI 总结
 
-- `app.py`: Main Streamlit application.
-- `daily_push.py`: CLI helper for scheduled push workflows.
-- `requirements.txt`: Python dependencies.
+1. 进入 `⚙ Settings`。
+2. 打开 **Use ChatGPT API**。
+3. 填入 **Session API Key**。
+4. 选择模型后保存。
 
-## Quick Start
+未配置 API Key 时，App 仍可用，只是 AI 相关内容会降级或隐藏。
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-streamlit run app.py
-```
+## 3. 在网页端使用 Slack 推送
 
-## Settings and Persistence
+### 3.1 先准备一个 Slack Webhook
 
-The app supports safe per-user behavior for public deployments:
+1. 访问：`https://api.slack.com/apps`
+2. 创建一个 Slack App，并开启 **Incoming Webhooks**。
+3. 添加到目标频道后，复制 Webhook URL（形如 `https://hooks.slack.com/services/...`）。
 
-- Browser local settings cache is used for user preferences.
-- Session state is used for generated digest display.
-- Server-side persistence is disabled by default on Streamlit Cloud to avoid cross-user leakage.
+### 3.2 在网页端接入 Webhook
 
-Environment flags:
+1. 回到 App 的 `⚙ Settings`。
+2. 打开 **Enable Webhook Push**。
+3. 粘贴刚才的 Webhook URL。
+4. 保存设置。
+5. 生成摘要后，点击 **Push to Webhook** 推送到 Slack。
 
-- `PUBLIC_MODE=1` to force public-safe mode.
-- `SERVER_PERSISTENCE=1` only for trusted single-user/self-host setups.
+### 3.3 推送内容
 
-## Data Sources and Fallbacks
+- 当日/当前筛选条件下的论文条目（含链接）
+- Worth Reading 摘要（有可用内容时）
 
-Primary sources include Crossref, PubMed, RSS, and arXiv (depending on selected journals/queries).
+## 4. 常见问题
 
-Reliability behavior includes:
-
-- short-term fetch cache,
-- stale-cache fallback when upstream temporarily returns empty,
-- journal-only mode for pure journal subscriptions,
-- targeted multi-journal backfill when only one journal is initially hit.
-
-## AI Configuration
-
-To enable AI features:
-
-1. Turn on **Use ChatGPT API** in Settings.
-2. Provide a **Session API Key** in Settings (session-only in public-safe mode).
-3. Choose model (default: `gpt-4.1-mini`).
-
-If no API key is set, AI-specific output is hidden/fallback behavior is used.
-
-## Slack Webhook Setup
-
-### Create Incoming Webhook
-
-1. Go to `https://api.slack.com/apps`
-2. Create a new app.
-3. Enable **Incoming Webhooks**.
-4. Add webhook to a workspace channel.
-5. Copy URL like:
-   `https://hooks.slack.com/services/...`
-
-### Configure in App
-
-1. Open `⚙ Settings`
-2. Enable **Webhook Push**
-3. Paste Webhook URL
-4. Save settings
-5. Generate digest and click **Push to Webhook**
-
-### What gets pushed
-
-- Today's selected papers (with links)
-- Worth Reading summary (with links when available)
-
-## Email Delivery
-
-Frontend:
-
-- User provides only recipient email.
-
-Backend SMTP (required):
-
-- `SMTP_HOST`
-- `SMTP_PORT`
-- `SMTP_USER`
-- `SMTP_PASSWORD`
-
-You can set these via Streamlit Secrets or environment variables.
-
-## Deploy on Streamlit Community Cloud
-
-1. Push code to GitHub.
-2. Create app on Streamlit Cloud with:
-   - repository: your repo
-   - branch: `main`
-   - main file: `app.py`
-3. Add secrets/env vars if needed (OpenAI/SMTP).
-4. Deploy and test.
-
-## Daily Auto Push via GitHub Actions
-
-This repo includes `.github/workflows/daily_slack_push.yml` to push digest to Slack daily.
-
-Required setup:
-
-1. Add `user_prefs.json` to repo root (the workflow reads this file).
-2. In GitHub repo settings, add secret:
-   - `SLACK_WEBHOOK_URL`
-3. Enable Actions in the repository.
-4. Optionally run once manually via **Actions -> Daily Slack Push -> Run workflow**.
-
-Schedule:
-
-- Default: `30 13 * * *` (13:30 UTC, about 08:30 US Eastern in standard time).
-
-Security note:
-
-- If a webhook URL was ever posted publicly, rotate/revoke it in Slack immediately and replace the GitHub secret.
+- 没有抓到论文：先放宽时间范围，再减少筛选关键词。
+- 点了推送但 Slack 没消息：检查 Webhook URL 是否完整、频道权限是否正确。
+- 误泄露了 Webhook URL：立即在 Slack 里撤销并重新生成，再更新 App 设置。
