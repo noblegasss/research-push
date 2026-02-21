@@ -1,9 +1,9 @@
 name: Multi-User Auto Push
 
 on:
-  schedule:
-    - cron: "* * * * *"
   workflow_dispatch:
+  repository_dispatch:
+    types: [supabase-auto-push]
 
 jobs:
   run-auto-push:

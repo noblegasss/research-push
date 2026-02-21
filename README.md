@@ -138,4 +138,36 @@ Security note:
 
 - If a webhook URL was ever posted publicly, rotate/revoke it in Slack immediately and replace the GitHub secret.
 
+## Multi-User Auto Push via Supabase Cron
 
+Use this for per-user auto push on public Streamlit deployments.
+
+1. Streamlit secrets:
+
+```toml
+AUTO_PUSH_DATABASE_URL="postgresql://...pooler...:6543/postgres?sslmode=require"
+AUTO_PUSH_MULTIUSER="1"
+SHOW_AUTO_PUSH_ADMIN_INFO="0"
+```
+
+2. GitHub repository secrets:
+
+- `AUTO_PUSH_DATABASE_URL`
+- Optional email: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`
+- Optional AI: `OPENAI_API_KEY`
+
+3. Supabase SQL Editor:
+
+- Run `supabase/sql/setup_auto_push_cron.sql`
+- Replace `GITHUB_PAT` in that file first
+- `GITHUB_PAT` should allow dispatching workflows on your repo (repo/actions write access)
+
+4. Workflow trigger model:
+
+- Supabase `pg_cron` runs every minute
+- It calls GitHub `repository_dispatch` (`event_type: supabase-auto-push`)
+- GitHub workflow `.github/workflows/auto_push_multiuser.yml` executes:
+
+```bash
+python daily_push.py --all-due
+```
