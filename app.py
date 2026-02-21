@@ -2036,7 +2036,15 @@ def list_due_auto_push_subscriptions(now_dt: datetime | None = None) -> list[dic
             local_dt = now_dt
         schedule = normalize_push_schedule(str(row["schedule"]))
         push_time = normalize_hhmm(str(row["push_time"])) or "09:00"
-        if local_dt.strftime("%H:%M") != push_time:
+        try:
+            push_hh, push_mm = push_time.split(":")
+            push_minutes = int(push_hh) * 60 + int(push_mm)
+        except Exception:
+            push_minutes = 9 * 60
+        now_minutes = local_dt.hour * 60 + local_dt.minute
+        # Scheduler jitter-safe rule:
+        # trigger once on the first run at/after target time in local day.
+        if now_minutes < push_minutes:
             continue
         if schedule == "weekly_monday" and local_dt.weekday() != 0:
             continue
