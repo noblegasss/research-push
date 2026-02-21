@@ -1025,6 +1025,27 @@ def inject_styles() -> None:
           letter-spacing: 0.01em;
           color: #f4fbff;
         }
+        .hero-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.8rem;
+        }
+        .repo-link {
+          display: inline-block;
+          text-decoration: none;
+          color: #e8f7ff !important;
+          border: 1px solid rgba(232, 247, 255, 0.5);
+          border-radius: 999px;
+          padding: 0.25rem 0.7rem;
+          font-size: 0.74rem;
+          font-weight: 600;
+          background: rgba(3, 24, 46, 0.22);
+        }
+        .repo-link:hover {
+          background: rgba(3, 24, 46, 0.35);
+          border-color: rgba(232, 247, 255, 0.82);
+        }
         .hero-sub {
           margin: 0.35rem 0 0 0;
           font-size: 0.82rem;
@@ -3039,12 +3060,16 @@ def main() -> None:
     st.set_page_config(page_title="Research Digest Engine", layout="wide")
     inject_styles()
     init_auto_push_db()
-    current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
+    current_lang = st.session_state.get("saved_settings", {}).get("language", "en")
+    repo_url = "https://github.com/noblegasss/research-push"
     feed_title = L(current_lang, "今日论文", "Research Feed")
     st.markdown(
         f"""
         <div class="hero">
-          <h3 class="hero-title">{feed_title}</h3>
+          <div class="hero-head">
+            <h3 class="hero-title">{feed_title}</h3>
+            <a class="repo-link" href="{repo_url}" target="_blank" rel="noopener noreferrer">Repository</a>
+          </div>
           <p class="hero-sub">{L(current_lang, "以最少噪音，持续跟踪高价值研究进展。", "Track high-value research with minimal noise.")}</p>
         </div>
         """,
@@ -3052,7 +3077,7 @@ def main() -> None:
     )
 
     default_settings = {
-        "language": "zh",
+        "language": "en",
         "fields": [],
         "custom_fields": "",
         "journals": [],
@@ -3217,16 +3242,18 @@ def main() -> None:
         )
         with tab_general:
             st.caption(L(ui_lang, "订阅范围与展示策略", "Scope and display strategy"))
-            g1, g2 = st.columns(2)
-            with g1:
-                selected_fields = st.multiselect(L(ui_lang, "领域", "Fields"), FIELD_OPTIONS, default=selected_fields)
-                custom_fields = st.text_input(L(ui_lang, "自定义领域", "Custom Fields"), custom_fields)
-                selected_journals = st.multiselect(L(ui_lang, "期刊", "Journals"), JOURNAL_OPTIONS, default=selected_journals)
-                custom_journals = st.text_input(L(ui_lang, "自定义期刊", "Custom Journals"), custom_journals)
-                strict_journal_only = st.toggle(L(ui_lang, "严格期刊匹配", "Strict journal match"), value=strict_journal_only)
-            with g2:
+            selected_fields = st.multiselect(L(ui_lang, "领域", "Fields"), FIELD_OPTIONS, default=selected_fields)
+            custom_fields = st.text_input(L(ui_lang, "自定义领域", "Custom Fields"), custom_fields)
+            selected_journals = st.multiselect(L(ui_lang, "期刊", "Journals"), JOURNAL_OPTIONS, default=selected_journals)
+            custom_journals = st.text_input(L(ui_lang, "自定义期刊", "Custom Journals"), custom_journals)
+            strict_journal_only = st.toggle(L(ui_lang, "严格期刊匹配", "Strict journal match"), value=strict_journal_only)
+            kw1, kw2 = st.columns(2)
+            with kw1:
                 keywords = st.text_input(L(ui_lang, "关键词", "Keywords"), keywords)
+            with kw2:
                 exclude = st.text_input(L(ui_lang, "排除关键词", "Exclude Keywords"), exclude)
+            sch1, sch2 = st.columns(2)
+            with sch1:
                 schedule_label = st.selectbox(
                     L(ui_lang, "推送周期", "Push Schedule"),
                     [schedule_options[k] for k in schedule_keys],
@@ -3234,6 +3261,7 @@ def main() -> None:
                 )
                 push_schedule = schedule_keys[[schedule_options[k] for k in schedule_keys].index(schedule_label)]
                 custom_days = st.slider(L(ui_lang, "自定义天数", "Custom range days"), 1, 60, custom_days, 1, disabled=push_schedule != "custom")
+            with sch2:
                 max_papers = st.slider(L(ui_lang, "最多论文数（0=全部）", "Max Papers (0=All)"), 0, 50, max_papers, 1)
                 layout_label = st.selectbox(
                     L(ui_lang, "信息流布局", "Feed Layout"),
@@ -3241,7 +3269,7 @@ def main() -> None:
                     index=layout_keys.index(saved_layout),
                 )
                 layout_mode = layout_keys[[layout_options[k] for k in layout_keys].index(layout_label)]
-                proxy_prefix = st.text_input(L(ui_lang, "学校代理前缀", "Institution Proxy Prefix"), proxy_prefix)
+            proxy_prefix = st.text_input(L(ui_lang, "学校代理前缀", "Institution Proxy Prefix"), proxy_prefix)
 
         with tab_delivery:
             st.caption(L(ui_lang, "自动推送与投递渠道", "Automation and delivery channels"))
