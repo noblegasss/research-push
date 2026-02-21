@@ -3072,6 +3072,10 @@ def main() -> None:
         if not smtp_ready_init:
             merged["auto_send_email"] = False
         st.session_state.saved_settings = merged
+    if "browser_settings_try_count" not in st.session_state:
+        st.session_state.browser_settings_try_count = 0
+    if "browser_settings_synced" not in st.session_state:
+        st.session_state.browser_settings_synced = False
     if "session_openai_api_key" not in st.session_state:
         st.session_state.session_openai_api_key = ""
     if "local_cache" not in st.session_state:
@@ -3100,6 +3104,25 @@ def main() -> None:
         st.session_state.last_fetch_diag = {}
     if "last_auto_email_sig" not in st.session_state:
         st.session_state.last_auto_email_sig = ""
+    if (
+        streamlit_js_eval is not None
+        and not st.session_state.get("browser_settings_synced", False)
+        and int(st.session_state.get("browser_settings_try_count", 0)) < 5
+    ):
+        st.session_state.browser_settings_try_count = int(st.session_state.get("browser_settings_try_count", 0)) + 1
+        browser_override_runtime = load_browser_settings(default_settings)
+        if browser_override_runtime:
+            merged_runtime = dict(st.session_state.saved_settings)
+            merged_runtime.update(browser_override_runtime)
+            merged_runtime["journals"] = normalize_str_list_input(merged_runtime.get("journals", []))
+            merged_runtime["fields"] = normalize_str_list_input(merged_runtime.get("fields", []))
+            if not str(merged_runtime.get("subscriber_id", "")).strip():
+                merged_runtime["subscriber_id"] = uuid4().hex
+            st.session_state.saved_settings = merged_runtime
+            st.session_state.browser_settings_synced = True
+            st.rerun()
+        elif int(st.session_state.get("browser_settings_try_count", 0)) >= 5:
+            st.session_state.browser_settings_synced = True
     # Safety unlock: avoid persistent disabled UI if previous run ended abnormally.
     if st.session_state.get("is_generating", False):
         st.session_state.is_generating = False
