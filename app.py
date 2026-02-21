@@ -172,6 +172,20 @@ FIELD_OPTIONS = [
     "NLP",
     "Bioinformatics",
 ]
+COMMON_TIMEZONE_OPTIONS = [
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Phoenix",
+    "America/Anchorage",
+    "Pacific/Honolulu",
+    "UTC",
+    "Europe/London",
+    "Europe/Paris",
+    "Asia/Shanghai",
+    "Asia/Tokyo",
+]
 SETTINGS_FILE = Path(".app_settings.json")
 LAST_DIGEST_FILE = Path(".last_digest_state.json")
 LOCAL_CACHE_FILE = Path(".local_cache.json")
@@ -3031,13 +3045,11 @@ def main() -> None:
     inject_styles()
     init_auto_push_db()
     current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
-    top_title = L(current_lang, "研究速递", "Research Digest")
     feed_title = L(current_lang, "今日论文", "Research Feed")
     st.markdown(
         f"""
         <div class="topbar">
           <div>
-            <p class="topbar-title">{top_title}</p>
           </div>
         </div>
         <div class="hero">
@@ -3238,10 +3250,15 @@ def main() -> None:
                 value=str(cur.get("daily_push_time", "09:00")),
                 help=L(ui_lang, "用于外部定时任务（cron/云调度）。", "Used by external scheduler (cron/cloud scheduler)."),
             )
-            push_timezone = st.text_input(
+            saved_tz = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
+            tz_options = list(COMMON_TIMEZONE_OPTIONS)
+            if saved_tz not in tz_options:
+                tz_options = [saved_tz] + tz_options
+            push_timezone = st.selectbox(
                 L(ui_lang, "推送时区（IANA）", "Push Timezone (IANA)"),
-                value=str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York"))),
-                help=L(ui_lang, "例如 Asia/Shanghai, America/New_York。", "For example: Asia/Shanghai, America/New_York."),
+                tz_options,
+                index=tz_options.index(saved_tz),
+                help=L(ui_lang, "选择推送时区。", "Select a timezone for auto push."),
             )
             enable_webhook_push = st.toggle(L(ui_lang, "启用 Webhook 推送", "Enable Webhook Push"), value=bool(cur.get("enable_webhook_push", False)))
             webhook_url = st.text_input(L(ui_lang, "Webhook 地址", "Webhook URL"), cur.get("webhook_url", ""), disabled=not enable_webhook_push)
