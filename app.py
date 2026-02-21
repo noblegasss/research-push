@@ -976,182 +976,216 @@ def inject_styles() -> None:
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
         :root {
-          --bg: #eef3f9;
-          --panel: #ffffff;
-          --line: #d8e2ee;
-          --text: #102336;
-          --muted: #5a7086;
-          --brand: #0f6bcf;
-          --brand-soft: #e7f1ff;
-          --shadow: 0 10px 30px rgba(16, 35, 54, 0.08);
+          --bg: #f2f6fb;
+          --surface: #ffffff;
+          --surface-soft: #f8fbff;
+          --line: #d7e2ee;
+          --text: #0f2438;
+          --muted: #5c7288;
+          --brand: #0a5ea8;
+          --brand-2: #0d9d89;
+          --brand-soft: #e8f2ff;
+          --shadow: 0 16px 34px rgba(11, 28, 44, 0.08);
         }
         .stApp {
           background:
-            radial-gradient(1200px 480px at 10% -10%, #dbe9ff 0%, transparent 55%),
-            radial-gradient(900px 360px at 100% 0%, #e7fff7 0%, transparent 50%),
+            radial-gradient(1200px 600px at -10% -10%, #dce9ff 0%, transparent 55%),
+            radial-gradient(1200px 600px at 100% -20%, #dff8f0 0%, transparent 58%),
+            linear-gradient(180deg, #f7faff 0%, #f2f6fb 100%),
             var(--bg);
           color: var(--text);
-          font-family: "Manrope", "Segoe UI", sans-serif;
+          font-family: "Sora", "Segoe UI", sans-serif;
         }
         .block-container {
-          max-width: 1220px;
-          padding-top: 3.2rem;
-          padding-bottom: 2.2rem;
+          max-width: 1240px;
+          padding-top: 2.8rem;
+          padding-bottom: 2.4rem;
         }
         @media (max-width: 900px) {
           .block-container {
-            padding-top: 3.8rem;
+            padding-top: 3.6rem;
           }
         }
         .topbar {
-          border: 1px solid #d5e0ec;
-          background: rgba(255, 255, 255, 0.86);
-          backdrop-filter: blur(6px);
-          border-radius: 14px;
-          padding: 0.75rem 1rem;
-          margin-bottom: 0.75rem;
+          border: 1px solid #d3dfeb;
+          background: rgba(255, 255, 255, 0.9);
+          border-radius: 16px;
+          padding: 0.78rem 1rem;
+          margin-bottom: 0.7rem;
           display: flex;
           align-items: center;
           justify-content: space-between;
-          box-shadow: 0 4px 18px rgba(16, 35, 54, 0.06);
+          gap: 0.8rem;
+          box-shadow: 0 8px 20px rgba(16, 35, 54, 0.06);
         }
         .topbar-title {
-          font-weight: 800;
-          font-size: 1.05rem;
-          letter-spacing: 0.01em;
-          color: #0a2239;
+          font-weight: 700;
+          font-size: 0.94rem;
+          letter-spacing: 0.02em;
+          color: #11304a;
           margin: 0;
         }
         .topbar-sub {
           margin: 0;
-          font-size: 0.84rem;
+          font-size: 0.78rem;
           color: var(--muted);
         }
+        .topbar-pill {
+          border: 1px solid #cfe0f2;
+          background: linear-gradient(180deg, #f8fcff 0%, #eef5ff 100%);
+          color: #16456d;
+          border-radius: 999px;
+          padding: 0.22rem 0.7rem;
+          font-size: 0.74rem;
+          font-weight: 600;
+          white-space: nowrap;
+        }
         .hero {
-          padding: 1rem 1.1rem;
-          border-radius: 14px;
+          padding: 1.05rem 1.12rem;
+          border-radius: 16px;
           background:
-            linear-gradient(130deg, #0d335c 0%, #1763a3 58%, #1d84ba 100%);
+            linear-gradient(120deg, #062a4b 0%, #0a5ea8 60%, #0d9d89 100%);
           color: #f8fbff;
-          border: 1px solid #2c6a99;
+          border: 1px solid #1f6797;
           margin-bottom: 1rem;
-          box-shadow: 0 12px 24px rgba(13, 51, 92, 0.22);
+          box-shadow: 0 18px 34px rgba(6, 42, 75, 0.25);
+        }
+        .hero-title {
+          margin: 0;
+          font-size: 1.1rem;
+          font-weight: 700;
+          letter-spacing: 0.01em;
+          color: #f4fbff;
+        }
+        .hero-sub {
+          margin: 0.35rem 0 0 0;
+          font-size: 0.82rem;
+          color: rgba(236, 248, 255, 0.93);
+        }
+        @media (max-width: 760px) {
+          .topbar {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .topbar-pill {
+            align-self: flex-start;
+          }
         }
         .feed-title {
           font-size: 1.04rem;
-          font-weight: 800;
+          font-weight: 700;
           margin: 0;
-          color: #0b2238;
+          color: #11283f;
           line-height: 1.35;
         }
         .kpi {
-          border-radius: 12px;
-          padding: 0.82rem 1rem;
-          background: var(--panel);
+          border-radius: 14px;
+          padding: 0.8rem 0.95rem;
+          background: var(--surface);
           border: 1px solid var(--line);
-          box-shadow: 0 4px 14px rgba(12, 26, 44, 0.06);
+          box-shadow: 0 8px 22px rgba(12, 26, 44, 0.06);
         }
         .paper-card {
-          border-radius: 14px;
-          padding: 1rem 1.05rem;
+          border-radius: 15px;
+          padding: 0.98rem 1.04rem;
           border: 1px solid var(--line);
-          background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-          margin-bottom: 0.78rem;
-          box-shadow: 0 6px 20px rgba(12, 26, 44, 0.07);
+          background: linear-gradient(180deg, var(--surface) 0%, var(--surface-soft) 100%);
+          margin-bottom: 0.75rem;
+          box-shadow: 0 8px 24px rgba(12, 26, 44, 0.07);
           transition: transform 120ms ease, box-shadow 120ms ease;
         }
         .paper-card:hover {
           transform: translateY(-1px);
-          box-shadow: 0 12px 24px rgba(12, 26, 44, 0.1);
+          box-shadow: 0 14px 30px rgba(12, 26, 44, 0.11);
         }
         .meta {
           color: var(--muted);
-          font-size: 0.83rem;
+          font-size: 0.8rem;
           margin-bottom: 0.55rem;
         }
         .pill {
           display: inline-block;
           border-radius: 999px;
-          padding: 0.1rem 0.62rem;
+          padding: 0.12rem 0.62rem;
           margin-right: 0.28rem;
           margin-top: 0.24rem;
-          background: var(--brand-soft);
-          color: #164f87;
-          font-size: 0.73rem;
-          border: 1px solid #cde0ff;
+          background: #edf5ff;
+          color: #175182;
+          font-size: 0.71rem;
+          border: 1px solid #cfddf0;
           font-weight: 600;
         }
         .section-line {
-          margin-top: 0.44rem;
+          margin-top: 0.4rem;
           color: var(--text);
-          font-size: 0.92rem;
-          line-height: 1.58;
+          font-size: 0.9rem;
+          line-height: 1.56;
         }
         .settings-panel {
-          border: 1px solid #d9e4ef;
-          border-radius: 14px;
-          background: linear-gradient(180deg, #ffffff 0%, #fcfdff 100%);
+          border: 1px solid #d5e1ed;
+          border-radius: 15px;
+          background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
           padding: 0.9rem 1rem;
           margin-bottom: 0.9rem;
-          box-shadow: 0 8px 20px rgba(12, 26, 44, 0.08);
+          box-shadow: 0 10px 24px rgba(12, 26, 44, 0.08);
         }
         .stTabs [data-baseweb="tab-list"] {
           gap: 8px;
-          background: #e9f0f8;
+          background: #e8f0f9;
           padding: 5px;
           border-radius: 12px;
         }
         .stTabs [data-baseweb="tab"] {
           border-radius: 10px;
-          padding: 9px 15px;
-          font-weight: 700;
-          color: #16324a !important;
+          padding: 8px 14px;
+          font-weight: 600;
+          color: #183953 !important;
         }
         .stTabs [data-baseweb="tab"]:not([aria-selected="true"]) {
           color: #244760 !important;
         }
         .stTabs [aria-selected="true"] {
           background: #ffffff !important;
-          color: #0f4a82 !important;
-          border: 1px solid #d3e1ef !important;
-          box-shadow: 0 3px 10px rgba(17, 42, 67, 0.08);
+          color: #0d4b7c !important;
+          border: 1px solid #d1dfec !important;
+          box-shadow: 0 4px 10px rgba(17, 42, 67, 0.08);
         }
         .stExpander {
-          border: 1px solid #d9e5f1 !important;
+          border: 1px solid #d7e3ef !important;
           border-radius: 12px !important;
           background: #ffffff;
-          box-shadow: 0 4px 14px rgba(16, 35, 54, 0.06);
+          box-shadow: 0 6px 16px rgba(16, 35, 54, 0.06);
         }
         .stExpander summary, .stExpander summary * {
           color: #16324a !important;
         }
         .stButton > button {
           border-radius: 10px;
-          border: 1px solid #c3d8ef;
-          background: linear-gradient(180deg, #ffffff 0%, #f6fbff 100%);
-          color: #123555;
-          font-weight: 700;
+          border: 1px solid #c8d9eb;
+          background: linear-gradient(180deg, #ffffff 0%, #f4f9ff 100%);
+          color: #123956;
+          font-weight: 600;
           min-height: 2.55rem;
-          box-shadow: 0 3px 12px rgba(17, 42, 67, 0.08);
+          box-shadow: 0 4px 12px rgba(17, 42, 67, 0.08);
         }
         .stButton > button:hover {
-          border-color: #8ab2dc;
-          color: #0f2f56;
+          border-color: #89afd5;
+          color: #0f3053;
           transform: translateY(-1px);
         }
         .stStatus {
           border-radius: 12px !important;
-          border: 1px solid #d8e3ef !important;
+          border: 1px solid #d6e2ee !important;
           box-shadow: var(--shadow);
         }
         .toolbar-title {
           margin: 0.45rem 0 0.35rem 0;
           color: var(--muted);
-          font-weight: 700;
+          font-weight: 600;
           font-size: 0.82rem;
-          letter-spacing: 0.01em;
+          letter-spacing: 0.04em;
           text-transform: uppercase;
         }
         .value-high { color: #166534; font-weight: 700; }
@@ -3045,15 +3079,22 @@ def main() -> None:
     inject_styles()
     init_auto_push_db()
     current_lang = st.session_state.get("saved_settings", {}).get("language", "zh")
+    app_title = L(current_lang, "Research Push 控制台", "Research Push Console")
+    app_subtitle = L(current_lang, "实时抓取 · 智能筛选 · 自动投递", "Live fetch · smart triage · auto delivery")
+    status_pill = L(current_lang, "多源联动中", "Multi-source online")
     feed_title = L(current_lang, "今日论文", "Research Feed")
     st.markdown(
         f"""
         <div class="topbar">
           <div>
+            <p class="topbar-title">{app_title}</p>
+            <p class="topbar-sub">{app_subtitle}</p>
           </div>
+          <div class="topbar-pill">{status_pill}</div>
         </div>
         <div class="hero">
-          <h3 style="margin:0;">{feed_title}</h3>
+          <h3 class="hero-title">{feed_title}</h3>
+          <p class="hero-sub">{L(current_lang, "以最少噪音，持续跟踪高价值研究进展。", "Track high-value research with minimal noise.")}</p>
         </div>
         """,
         unsafe_allow_html=True,
