@@ -2,7 +2,7 @@ name: Multi-User Auto Push
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "* * * * *"
   workflow_dispatch:
 
 jobs:
