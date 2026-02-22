@@ -218,7 +218,14 @@ class Paper:
 
 
 def L(lang: str, zh: str, en: str) -> str:
-    return zh if (lang or "zh").lower().startswith("zh") else en
+    return zh if normalize_language(lang) == "zh" else en
+
+
+def normalize_language(value: Any) -> str:
+    v = str(value or "").strip().lower()
+    if v.startswith("zh") or v in {"chinese", "中文", "cn"}:
+        return "zh"
+    return "en"
 
 
 def now_utc() -> datetime:
@@ -1846,8 +1853,9 @@ def build_runtime_prefs_from_settings(settings: dict[str, Any]) -> tuple[dict[st
     keywords = parse_setting_tokens(settings.get("keywords", ""))
     exclude = parse_setting_tokens(settings.get("exclude_keywords", "survey"))
     days = push_days_by_schedule(push_schedule, custom_days)
+    lang = normalize_language(settings.get("language", "en"))
     prefs = {
-        "language": str(settings.get("language", "zh")),
+        "language": lang,
         "fields": fields,
         "journals": journals,
         "strict_journal_only": bool(settings.get("strict_journal_only", True)),
@@ -1941,6 +1949,8 @@ def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], 
     prefs, plan = build_runtime_prefs_from_settings(settings)
     packed_settings = dict(settings)
     packed_settings["derived_prefs"] = prefs
+    webhook_url = str(settings.get("webhook_url", "")).strip()
+    now_iso = now_utc().isoformat()
     params = (
         sid,
         1 if enabled else 0,
@@ -1949,7 +1959,7 @@ def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], 
         plan["daily_push_time"],
         plan["push_timezone"],
         json.dumps(packed_settings, ensure_ascii=False),
-        now_utc().isoformat(),
+        now_iso,
     )
     if AUTO_PUSH_BACKEND == "postgres":
         if psycopg2 is None:
@@ -1981,6 +1991,18 @@ def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], 
                         """,
                         params,
                     )
+                    # Keep only one enabled subscription per webhook URL.
+                    if enabled and webhook_url:
+                        cur.execute(
+                            """
+                            UPDATE auto_push_subscriptions
+                            SET enabled = 0, updated_at_utc = %s
+                            WHERE enabled = 1
+                              AND subscriber_id <> %s
+                              AND COALESCE((settings_json::jsonb ->> 'webhook_url'), '') = %s
+                            """,
+                            (now_iso, sid, webhook_url),
+                        )
             return True, "ok"
         except Exception as exc:
             return False, str(exc)
@@ -2012,6 +2034,18 @@ def upsert_auto_push_subscription(subscriber_id: str, settings: dict[str, Any], 
                 """,
                 params,
             )
+            # Keep only one enabled subscription per webhook URL.
+            if enabled and webhook_url:
+                conn.execute(
+                    """
+                    UPDATE auto_push_subscriptions
+                    SET enabled = 0, updated_at_utc = ?
+                    WHERE enabled = 1
+                      AND subscriber_id <> ?
+                      AND COALESCE(json_extract(settings_json, '$.webhook_url'), '') = ?
+                    """,
+                    (now_iso, sid, webhook_url),
+                )
         return True, "ok"
     except Exception as exc:
         return False, str(exc)
@@ -2391,15 +2425,29 @@ def post_webhook(webhook_url: str, payload: dict[str, Any], lang: str = "zh") ->
                 today_papers.extend(digest.get("top_picks", []))
             if isinstance(digest.get("also_notable"), list):
                 today_papers.extend(digest.get("also_notable", []))
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            journal_order: list[str] = []
+            for p in today_papers:
+                venue = str(p.get("venue", "")).strip() or L(lang, "未知期刊", "Unknown Venue")
+                if venue not in grouped:
+                    grouped[venue] = []
+                    journal_order.append(venue)
+                grouped[venue].append(p)
+
             paper_lines: list[str] = []
-            for i, p in enumerate(today_papers, start=1):
-                title = str(p.get("title", "")).strip()
-                venue = str(p.get("venue", "")).strip()
-                date = str(p.get("date", "")).strip()
-                link = str(p.get("link", "")).strip()
-                meta = ", ".join([x for x in [venue, date] if x])
-                head = f"{i}. {title}" + (f" ({meta})" if meta else "")
-                paper_lines.append(head + (f" - {link}" if link else ""))
+            for venue in journal_order:
+                paper_lines.append(f"[{venue}]")
+                papers = grouped.get(venue, [])
+                for i, p in enumerate(papers, start=1):
+                    title = str(p.get("title", "")).strip()
+                    pdate = str(p.get("date", "")).strip()
+                    link = str(p.get("link", "")).strip()
+                    head = f"{i}. {title}" + (f" ({pdate})" if pdate else "")
+                    paper_lines.append(head + (f" - {link}" if link else ""))
+                paper_lines.append("")
+
+            if paper_lines and not paper_lines[-1].strip():
+                paper_lines.pop()
             if not paper_lines:
                 paper_lines.append(L(lang, "（无论文）", "(No papers)"))
             text = "\n".join(
