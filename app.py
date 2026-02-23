@@ -3257,6 +3257,8 @@ def main() -> None:
         proxy_prefix = str(cur.get("proxy_prefix", ""))
         enable_auto_push = bool(cur.get("enable_auto_push", False))
         daily_push_time = str(cur.get("daily_push_time", "09:00"))
+        daily_push_time_norm = normalize_hhmm(daily_push_time) or "09:00"
+        daily_hour_default, daily_minute_default = daily_push_time_norm.split(":")
         saved_tz = normalize_timezone(str(cur.get("push_timezone", os.getenv("APP_TIMEZONE", "America/New_York")))) or "America/New_York"
         enable_webhook_push = bool(cur.get("enable_webhook_push", False))
         webhook_url = str(cur.get("webhook_url", ""))
@@ -3339,11 +3341,20 @@ def main() -> None:
                             f"Auto-push subscription storage is disabled: {reason or 'Configure AUTO_PUSH_DATABASE_URL or SERVER_PERSISTENCE=1.'}",
                         )
                     )
-                daily_push_time = st.text_input(
-                    L(ui_lang, "每日推送时间（HH:MM）", "Daily Push Time (HH:MM)"),
-                    value=daily_push_time,
-                    help=L(ui_lang, "用于外部定时任务（cron/云调度）。", "Used by external scheduler (cron/cloud scheduler)."),
-                )
+                t1, t2 = st.columns(2)
+                with t1:
+                    daily_hour = st.selectbox(
+                        L(ui_lang, "每日推送小时", "Daily Push Hour"),
+                        [f"{i:02d}" for i in range(24)],
+                        index=int(daily_hour_default),
+                    )
+                with t2:
+                    daily_minute = st.selectbox(
+                        L(ui_lang, "每日推送分钟", "Daily Push Minute"),
+                        [f"{i:02d}" for i in range(60)],
+                        index=int(daily_minute_default),
+                    )
+                daily_push_time = f"{daily_hour}:{daily_minute}"
                 tz_options = list(COMMON_TIMEZONE_OPTIONS)
                 if saved_tz not in tz_options:
                     tz_options = [saved_tz] + tz_options
