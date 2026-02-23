@@ -10,6 +10,7 @@ from app import (
     fetch_candidates,
     list_due_auto_push_subscriptions,
     mark_auto_push_run,
+    release_auto_push_slot,
     post_webhook,
 )
 
@@ -82,7 +83,7 @@ def main() -> None:
                 success += 1
                 print(f"[ok] {sid[:8]} {item['timezone']} {item['local_time']}")
             else:
-                mark_auto_push_run(sid, None, msg)
+                release_auto_push_slot(sid, item["local_date"], msg)
                 failed += 1
                 print(f"[failed] {sid[:8]}: {msg}")
         if failed:

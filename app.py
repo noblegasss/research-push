@@ -2102,6 +2102,12 @@ def list_due_auto_push_subscriptions(now_dt: datetime | None = None) -> list[dic
         return []
 
     due: list[dict[str, Any]] = []
+    grace_default = 15
+    try:
+        grace_minutes = int(str(os.getenv("AUTO_PUSH_GRACE_MINUTES", str(grace_default))).strip() or str(grace_default))
+    except Exception:
+        grace_minutes = grace_default
+    grace_minutes = max(1, min(180, grace_minutes))
     for row in rows:
         tz_name = normalize_timezone(str(row["timezone"])) or "America/New_York"
         try:
@@ -2116,9 +2122,8 @@ def list_due_auto_push_subscriptions(now_dt: datetime | None = None) -> list[dic
         except Exception:
             push_minutes = 9 * 60
         now_minutes = local_dt.hour * 60 + local_dt.minute
-        # Scheduler jitter-safe rule:
-        # trigger once on the first run at/after target time in local day.
-        if now_minutes < push_minutes:
+        # Trigger only within a bounded window to avoid very-late accidental delivery.
+        if now_minutes < push_minutes or now_minutes > (push_minutes + grace_minutes):
             continue
         if schedule == "weekly_monday" and local_dt.weekday() != 0:
             continue
@@ -2130,6 +2135,8 @@ def list_due_auto_push_subscriptions(now_dt: datetime | None = None) -> list[dic
             if not isinstance(settings, dict):
                 continue
         except Exception:
+            continue
+        if not claim_auto_push_slot(str(row["subscriber_id"]), local_date):
             continue
         due.append(
             {
@@ -2197,6 +2204,96 @@ def mark_auto_push_run(subscriber_id: str, local_date: str | None, error: str = 
                     """,
                     (err, now_text, subscriber_id),
                 )
+    except Exception:
+        return
+
+
+def claim_auto_push_slot(subscriber_id: str, local_date: str) -> bool:
+    if not AUTO_PUSH_ENABLED:
+        return False
+    sid = (subscriber_id or "").strip()
+    day = (local_date or "").strip()
+    if not sid or not day:
+        return False
+    now_text = now_utc().isoformat()
+    if AUTO_PUSH_BACKEND == "postgres":
+        if psycopg2 is None:
+            return False
+        try:
+            with psycopg2.connect(AUTO_PUSH_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE auto_push_subscriptions
+                        SET last_run_local_date = %s, updated_at_utc = %s
+                        WHERE subscriber_id = %s
+                          AND enabled = 1
+                          AND COALESCE(last_run_local_date, '') <> %s
+                        """,
+                        (day, now_text, sid, day),
+                    )
+                    return (cur.rowcount or 0) > 0
+        except Exception:
+            return False
+    if AUTO_PUSH_BACKEND != "sqlite":
+        return False
+    try:
+        with sqlite3.connect(AUTO_PUSH_DB_FILE) as conn:
+            cur = conn.execute(
+                """
+                UPDATE auto_push_subscriptions
+                SET last_run_local_date = ?, updated_at_utc = ?
+                WHERE subscriber_id = ?
+                  AND enabled = 1
+                  AND COALESCE(last_run_local_date, '') <> ?
+                """,
+                (day, now_text, sid, day),
+            )
+            return int(cur.rowcount or 0) > 0
+    except Exception:
+        return False
+
+
+def release_auto_push_slot(subscriber_id: str, local_date: str, error: str = "") -> None:
+    if not AUTO_PUSH_ENABLED:
+        return
+    sid = (subscriber_id or "").strip()
+    day = (local_date or "").strip()
+    if not sid or not day:
+        return
+    err = (error or "")[:500]
+    now_text = now_utc().isoformat()
+    if AUTO_PUSH_BACKEND == "postgres":
+        if psycopg2 is None:
+            return
+        try:
+            with psycopg2.connect(AUTO_PUSH_DATABASE_URL) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE auto_push_subscriptions
+                        SET last_run_local_date = '', last_error = %s, updated_at_utc = %s
+                        WHERE subscriber_id = %s
+                          AND last_run_local_date = %s
+                        """,
+                        (err, now_text, sid, day),
+                    )
+            return
+        except Exception:
+            return
+    if AUTO_PUSH_BACKEND != "sqlite":
+        return
+    try:
+        with sqlite3.connect(AUTO_PUSH_DB_FILE) as conn:
+            conn.execute(
+                """
+                UPDATE auto_push_subscriptions
+                SET last_run_local_date = '', last_error = ?, updated_at_utc = ?
+                WHERE subscriber_id = ?
+                  AND last_run_local_date = ?
+                """,
+                (err, now_text, sid, day),
+            )
     except Exception:
         return
 
