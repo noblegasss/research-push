@@ -64,6 +64,9 @@ JOURNAL_ALIASES = {
     "nature genetics": ["nat genet"],
     "nature neuroscience": ["nat neurosci"],
     "nature communications": ["nat commun"],
+    "nature methods": ["nat methods"],
+    "nature cancer": ["nat cancer"],
+    "nature aging": ["nat aging"],
     "the lancet": ["lancet"],
     "the lancet oncology": ["lancet oncol"],
     "the lancet digital health": ["lancet digit health"],
@@ -72,6 +75,9 @@ JOURNAL_ALIASES = {
     "jama": ["journal of the american medical association"],
     "jama oncology": ["jama oncol"],
     "jama neurology": ["jama neurol"],
+    "arxiv": ["arxiv preprint", "arxiv.org"],
+    "biorxiv": ["biorxiv preprint", "biorxiv.org", "cold spring harbor laboratory"],
+    "medrxiv": ["medrxiv preprint", "medrxiv.org"],
 }
 JOURNAL_RSS_FEEDS = {
     "nature": ["https://www.nature.com/nature.rss"],
@@ -80,6 +86,17 @@ JOURNAL_RSS_FEEDS = {
     "nature genetics": ["https://www.nature.com/ng.rss"],
     "nature neuroscience": ["https://www.nature.com/neuro.rss"],
     "nature communications": ["https://www.nature.com/ncomms.rss"],
+    "nature methods": ["https://www.nature.com/nmeth.rss"],
+    "nature cancer": ["https://www.nature.com/natcancer.rss"],
+    "nature aging": ["https://www.nature.com/nataging.rss"],
+    "arxiv": [
+        "https://rss.arxiv.org/rss/cs.AI",
+        "https://rss.arxiv.org/rss/cs.LG",
+        "https://rss.arxiv.org/rss/cs.CV",
+        "https://rss.arxiv.org/rss/q-bio",
+    ],
+    "biorxiv": ["https://connect.biorxiv.org/biorxiv_xml.php?subject=all"],
+    "medrxiv": ["https://connect.biorxiv.org/medrxiv_xml.php?subject=all"],
 }
 JOURNAL_OPTIONS = [
     "Nature",
@@ -155,6 +172,60 @@ JOURNAL_OPTIONS = [
     "NAACL",
     "COLING",
     "arXiv",
+    # Aging / Neurodegeneration
+    "Journal of Alzheimer's Disease",
+    "Alzheimer's & Dementia",
+    "Alzheimer's Research & Therapy",
+    "Alzheimer's & Dementia: Diagnosis Assessment & Disease Monitoring",
+    "Alzheimer's & Dementia: Translational Research & Clinical Interventions",
+    "Dementia and Geriatric Cognitive Disorders",
+    "Journal of Alzheimer's Disease & Parkinsonism",
+    "Acta Neuropathologica",
+    "Acta Neuropathologica Communications",
+    "Neurobiology of Aging",
+    "Neurobiology of Disease",
+    "Ageing Research Reviews",
+    "GeroScience",
+    "Age and Ageing",
+    "Aging Cell",
+    "Aging (Albany NY)",
+    "npj Aging",
+    "Biogerontology",
+    "Rejuvenation Research",
+    "Translational Neurodegeneration",
+    "Frontiers in Aging Neuroscience",
+    "Frontiers in Neurology",
+    "Frontiers in Dementia",
+    "Brain Communications",
+    "npj Parkinson's Disease",
+    "Parkinsonism & Related Disorders",
+    "Movement Disorders",
+    "Annals of Clinical and Translational Neurology",
+    "Journal of Neuroinflammation",
+    # Sleep
+    "Sleep",
+    "Journal of Sleep Research",
+    "Sleep Medicine",
+    "Sleep Medicine Reviews",
+    # Stroke / Cerebrovascular
+    "Stroke",
+    "Journal of Cerebral Blood Flow & Metabolism",
+    "International Journal of Stroke",
+    # Neuro-oncology
+    "Neuro-Oncology",
+    "Neuro-Oncology Advances",
+    "Journal of Neuro-Oncology",
+    # Microbiome
+    "Microbiome",
+    "Gut Microbes",
+    # Epidemiology
+    "International Journal of Epidemiology",
+    "American Journal of Epidemiology",
+    "European Journal of Epidemiology",
+    # Genetics / Rare disease
+    "Genetics in Medicine",
+    "European Journal of Human Genetics",
+    "Orphanet Journal of Rare Diseases",
 ]
 FIELD_OPTIONS = [
     "AI",
@@ -1538,7 +1609,17 @@ def passes(p: Paper, prefs: dict[str, Any]) -> bool:
     return True
 
 
-def score(p: Paper, prefs: dict[str, Any]) -> dict[str, int]:
+_AI_SCORE_CACHE: dict[str, dict[str, Any]] = {}
+
+
+def _clamp_score(v: Any) -> int:
+    try:
+        return max(0, min(100, int(round(float(v)))))
+    except Exception:
+        return 0
+
+
+def _heuristic_score(p: Paper, prefs: dict[str, Any]) -> dict[str, int]:
     text = f"{p.title} {p.abstract}".lower()
     kw = prefs.get("keywords", [])
     fields = prefs.get("fields", [])
@@ -1554,6 +1635,150 @@ def score(p: Paper, prefs: dict[str, Any]) -> dict[str, int]:
     s = sum(float(w.get(k, 0)) for k in ("relevance", "novelty", "rigor", "impact")) or 1.0
     total = round((float(w.get("relevance", 0.35)) / s) * rel + (float(w.get("novelty", 0.25)) / s) * nov + (float(w.get("rigor", 0.25)) / s) * rig + (float(w.get("impact", 0.15)) / s) * imp)
     return {"relevance": rel, "novelty": nov, "rigor": rig, "impact": imp, "total": total}
+
+
+def _heuristic_reasons(p: Paper, sc: dict[str, int], lang: str) -> dict[str, str]:
+    has_abs = bool((p.abstract or "").strip())
+    return {
+        "relevance": L(
+            lang,
+            "基于关键词/领域命中与期刊匹配度估计。",
+            "Estimated from keyword/field hits and journal match.",
+        ),
+        "novelty": L(
+            lang,
+            "依据新颖性词汇与发布时间信号估计。",
+            "Estimated from novelty cues and publication recency.",
+        ),
+        "rigor": L(
+            lang,
+            "依据摘要中的方法与统计线索估计。",
+            "Estimated from method and statistical cues in abstract.",
+        ),
+        "impact": L(
+            lang,
+            "基于其余维度与期刊影响信号综合。",
+            "Combined from other dimensions and venue impact cues.",
+        ),
+    }
+
+
+def _score_cache_key(p: Paper, prefs: dict[str, Any]) -> str:
+    lang = str(prefs.get("language", "en"))
+    kw = ",".join(sorted(str(x) for x in prefs.get("keywords", [])))
+    fields = ",".join(sorted(str(x) for x in prefs.get("fields", [])))
+    return "||".join([
+        normalize_text(p.title),
+        normalize_text(p.venue),
+        str(p.publication_date or ""),
+        normalize_text((p.abstract or "")[:1200]),
+        lang,
+        kw,
+        fields,
+    ])
+
+
+def _try_ai_score(p: Paper, prefs: dict[str, Any], base: dict[str, int]) -> dict[str, Any] | None:
+    api_key = str(prefs.get("openai_api_key", "")).strip() or os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    try:
+        from openai import OpenAI
+    except Exception:
+        return None
+
+    lang = prefs.get("language", "en")
+    model = str(prefs.get("api_model", "gpt-4.1-mini")).strip() or "gpt-4.1-mini"
+    if (lang or "en").startswith("zh"):
+        sys_prompt = (
+            "你是严格的科研评审。请只输出JSON，不要解释。\n"
+            "字段：relevance, novelty, rigor, impact（0-100整数）以及 reasons 对象。\n"
+            "reasons 必须包含 relevance/novelty/rigor/impact 四个键，每个值<=20字，简洁可读。"
+        )
+    else:
+        sys_prompt = (
+            "You are a strict research reviewer. Output JSON only, no prose.\n"
+            "Fields: relevance, novelty, rigor, impact (0-100 integers), and reasons object.\n"
+            "reasons must include relevance/novelty/rigor/impact; each reason <= 20 words."
+        )
+
+    payload = {
+        "title": p.title,
+        "venue": p.venue,
+        "date": p.publication_date,
+        "abstract": p.abstract,
+        "keywords": prefs.get("keywords", []),
+        "fields": prefs.get("fields", []),
+        "heuristic_scores": base,
+    }
+
+    try:
+        client = OpenAI(api_key=api_key)
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            max_output_tokens=450,
+            timeout=18,
+        )
+        text = (getattr(resp, "output_text", "") or "").strip()
+        try:
+            data = json.loads(text)
+        except Exception:
+            m = re.search(r"\{[\s\S]*\}", text)
+            if not m:
+                return None
+            data = json.loads(m.group(0))
+        rel = _clamp_score(data.get("relevance"))
+        nov = _clamp_score(data.get("novelty"))
+        rig = _clamp_score(data.get("rigor"))
+        imp = _clamp_score(data.get("impact"))
+        reasons_in = data.get("reasons") if isinstance(data.get("reasons"), dict) else {}
+        reasons = {
+            "relevance": str(reasons_in.get("relevance", "")).strip(),
+            "novelty": str(reasons_in.get("novelty", "")).strip(),
+            "rigor": str(reasons_in.get("rigor", "")).strip(),
+            "impact": str(reasons_in.get("impact", "")).strip(),
+        }
+        w = prefs.get("ranking_weights", {"relevance": 0.35, "novelty": 0.25, "rigor": 0.25, "impact": 0.15})
+        s = sum(float(w.get(k, 0)) for k in ("relevance", "novelty", "rigor", "impact")) or 1.0
+        total = round(
+            (float(w.get("relevance", 0.35)) / s) * rel
+            + (float(w.get("novelty", 0.25)) / s) * nov
+            + (float(w.get("rigor", 0.25)) / s) * rig
+            + (float(w.get("impact", 0.15)) / s) * imp
+        )
+        return {
+            "relevance": rel,
+            "novelty": nov,
+            "rigor": rig,
+            "impact": imp,
+            "total": total,
+            "reasons": reasons,
+        }
+    except Exception:
+        return None
+
+
+def score(p: Paper, prefs: dict[str, Any], use_ai: bool = False) -> dict[str, Any]:
+    base = _heuristic_score(p, prefs)
+    lang = prefs.get("language", "en")
+    if not use_ai:
+        return {**base, "reasons": _heuristic_reasons(p, base, lang)}
+
+    key = _score_cache_key(p, prefs)
+    if key in _AI_SCORE_CACHE:
+        return _AI_SCORE_CACHE[key]
+
+    ai = _try_ai_score(p, prefs, base)
+    if ai:
+        _AI_SCORE_CACHE[key] = ai
+        return ai
+    out = {**base, "reasons": _heuristic_reasons(p, base, lang)}
+    _AI_SCORE_CACHE[key] = out
+    return out
 
 
 def value_label(total: int, lang: str = "zh") -> str:
@@ -1863,6 +2088,9 @@ def build_runtime_prefs_from_settings(settings: dict[str, Any]) -> tuple[dict[st
         "exclude_keywords": exclude,
         "date_range_days": days,
         "max_papers": int(settings.get("max_papers", 0)),
+        "openai_api_key": str(settings.get("openai_api_key", "")),
+        "api_model": str(settings.get("api_model", "gpt-4.1-mini")),
+        "ai_score_limit": int(settings.get("ai_score_limit", 24)),
         "reading_level": "mixed",
         "ranking_weights": {"relevance": 0.35, "novelty": 0.25, "rigor": 0.25, "impact": 0.15},
     }
@@ -2359,7 +2587,6 @@ def llm_enhance_summary(
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
-            temperature=0.2,
         )
         text = (getattr(resp, "output_text", "") or "").strip()
         data = json.loads(text)
@@ -2436,7 +2663,6 @@ def ai_select_worth_reading(
                     ),
                 },
             ],
-            temperature=0.1,
         )
         text = (getattr(resp, "output_text", "") or "").strip()
         data = json.loads(text)
@@ -2714,7 +2940,7 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
             filtered.append(p)
         if filtered:
             filter_mode = "date_only_fallback"
-    scored = [{"paper": p, "scores": score(p, prefs)} for p in filtered]
+    scored = [{"paper": p, "scores": score(p, prefs, use_ai=False)} for p in filtered]
     scored.sort(key=lambda x: x["scores"]["total"], reverse=True)
     max_papers = int(prefs.get("max_papers", 0))
     picked = scored if max_papers <= 0 else scored[:max_papers]
@@ -2745,6 +2971,17 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
                 continue
             balanced.append(item)
         picked = balanced if max_papers <= 0 else balanced[:max_papers]
+
+    # Second-pass AI scoring for shortlisted papers (cost-controlled).
+    ai_limit = int(prefs.get("ai_score_limit", 24))
+    if ai_limit > 0 and picked:
+        rescored: list[dict[str, Any]] = []
+        for i, item in enumerate(picked):
+            if i < ai_limit:
+                rescored.append({"paper": item["paper"], "scores": score(item["paper"], prefs, use_ai=True)})
+            else:
+                rescored.append(item)
+        picked = sorted(rescored, key=lambda x: int(x["scores"].get("total", 0)), reverse=True)
     n = len(picked)
     top_n = n if n <= 3 else 3 if n <= 5 else 5
     top, also = picked[:top_n], picked[top_n:]

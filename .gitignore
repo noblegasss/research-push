@@ -3,3 +3,25 @@
 .local_cache.json
 .streamlit/secrets.toml
 .env
+.env.*
+
+# macOS
+.DS_Store
+.Rhistory
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Database / local state
+*.sqlite3
+*.sqlite
+*.db
+
+# Claude / IDE
+.claude/
+.idea/
+.vscode/

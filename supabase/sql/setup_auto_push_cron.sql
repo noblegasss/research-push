@@ -17,7 +17,7 @@ select cron.schedule(
     url := 'https://api.github.com/repos/noblegasss/research-push/dispatches',
     headers := jsonb_build_object(
       'Accept', 'application/vnd.github+json',
-      'Authorization', 'Bearer GITHUB_PAT',
+      'Authorization', 'Bearer YOUR_GITHUB_PAT_HERE',
       'X-GitHub-Api-Version', '2022-11-28',
       'Content-Type', 'application/json'
     ),
