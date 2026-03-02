@@ -856,12 +856,17 @@ def recover_missing_abstract_for_paper(p: Paper) -> str:
     if p.abstract.strip():
         return p.abstract.strip()
     pid = paper_id(p)
-    local_cache = st.session_state.get("local_cache", {})
-    abs_cache = local_cache.get("abstract_by_id", {}) if isinstance(local_cache, dict) else {}
-    if isinstance(abs_cache, dict):
-        cached = str(abs_cache.get(pid, "")).strip()
-        if cached:
-            return cached
+    # session_state reads/writes guarded: this function may be called from worker
+    # threads (ThreadPoolExecutor) where st.session_state is not accessible.
+    try:
+        local_cache = st.session_state.get("local_cache", {})
+        abs_cache = local_cache.get("abstract_by_id", {}) if isinstance(local_cache, dict) else {}
+        if isinstance(abs_cache, dict):
+            cached = str(abs_cache.get(pid, "")).strip()
+            if cached:
+                return cached
+    except Exception:
+        pass
     abstract = ""
     if p.pmid:
         abstract = fetch_pubmed_abstract_by_pmid(p.pmid)
@@ -875,10 +880,14 @@ def recover_missing_abstract_for_paper(p: Paper) -> str:
         abstract = fetch_summary_from_fulltext(p.url)
     abstract = abstract.strip()
     if abstract:
-        if "local_cache" not in st.session_state or not isinstance(st.session_state.local_cache, dict):
-            st.session_state.local_cache = {"abstract_by_id": {}, "llm_summary_cache": {}}
-        st.session_state.local_cache.setdefault("abstract_by_id", {})[pid] = abstract
-        st.session_state.local_cache_dirty = True
+        # Best-effort cache write; silently skipped when called from a worker thread.
+        try:
+            if "local_cache" not in st.session_state or not isinstance(st.session_state.local_cache, dict):
+                st.session_state.local_cache = {"abstract_by_id": {}, "llm_summary_cache": {}}
+            st.session_state.local_cache.setdefault("abstract_by_id", {})[pid] = abstract
+            st.session_state.local_cache_dirty = True
+        except Exception:
+            pass
     return abstract
 
 
@@ -912,16 +921,18 @@ def enrich_digest_display_abstracts(digest: dict[str, Any], lang: str = "zh", ma
         return pid, abs_text
 
     workers = max(1, min(ABSTRACT_ENRICH_WORKERS, len(targets)))
+    cache_updates: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
         future_to_card = {ex.submit(enrich_card, c): c for c in targets}
         for fut in as_completed(future_to_card):
             c = future_to_card[fut]
             try:
-                _, abs_text = fut.result()
+                pid, abs_text = fut.result()
             except Exception:
-                abs_text = ""
+                abs_text, pid = "", str(c.get("paper_id", ""))
             if not abs_text:
                 continue
+            cache_updates[pid] = abs_text
             c["source_abstract"] = abs_text
             c["abstract_excerpt"] = abs_text
             c["evidence_note"] = "Based on abstract/metadata."
@@ -936,6 +947,15 @@ def enrich_digest_display_abstracts(digest: dict[str, Any], lang: str = "zh", ma
                 url=str(c.get("link", "")),
             )
             c["ai_feed_summary"] = fallback_feed_summary(p_tmp, sc, lang=lang)
+    # Write all abstract cache updates in the main thread (thread-safe).
+    if cache_updates:
+        try:
+            if not isinstance(st.session_state.get("local_cache"), dict):
+                st.session_state.local_cache = {"abstract_by_id": {}, "llm_summary_cache": {}}
+            st.session_state.local_cache.setdefault("abstract_by_id", {}).update(cache_updates)
+            st.session_state.local_cache_dirty = True
+        except Exception:
+            pass
 
 
 def clean_abstract(text: str) -> str:
@@ -2513,7 +2533,7 @@ def post_webhook(webhook_url: str, payload: dict[str, Any], lang: str = "zh") ->
     try:
         url = webhook_url.strip()
         # Slack Incoming Webhook expects a Slack-shaped payload (e.g., "text").
-        if "hooks.slack.com/services/" in url:
+        if "hooks.slack.com" in url:
             date = payload.get("date", "")
             worth = str(payload.get("worth_reading_summary", ""))
             digest = payload.get("digest", {}) if isinstance(payload.get("digest"), dict) else {}
