@@ -75,6 +75,32 @@ JOURNAL_ALIASES = {
     "jama": ["journal of the american medical association"],
     "jama oncology": ["jama oncol"],
     "jama neurology": ["jama neurol"],
+    "science": ["science new york n y", "science new york"],
+    "science advances": ["sci adv"],
+    "science translational medicine": ["sci transl med"],
+    "cell": ["cell press"],
+    "cell reports": ["cell rep"],
+    "cancer cell": ["cancer cell"],
+    "alzheimer s dementia": ["alzheimers dement", "alzheimers dementia", "alzheimer s dement"],
+    "alzheimer s research therapy": ["alzheimers res ther", "alzheimers research therapy"],
+    "journal of alzheimer s disease": ["j alzheimers dis", "j alzheimer s dis", "journal of alzheimers disease"],
+    "cells": ["cells basel"],
+    "pnas": ["proc natl acad sci u s a", "proc natl acad sci", "proceedings of the national academy of sciences"],
+    "elife": ["elife"],
+    "bioinformatics": ["bioinformatics oxford england", "bioinformatics oxford"],
+    "briefings in bioinformatics": ["brief bioinform"],
+    "genome biology": ["genome biol"],
+    "nucleic acids research": ["nucleic acids res"],
+    "aging cell": ["aging cell"],
+    "ageing research reviews": ["ageing res rev"],
+    "neurobiology of aging": ["neurobiol aging"],
+    "neurobiology of disease": ["neurobiol dis"],
+    "acta neuropathologica": ["acta neuropathol"],
+    "scientific reports": ["sci rep"],
+    "nature machine intelligence": ["nat mach intell"],
+    "nature computational science": ["nat comput sci"],
+    "npj aging": ["npj aging"],
+    "npj genomic medicine": ["npj genom med"],
     "arxiv": ["arxiv preprint", "arxiv.org"],
     "biorxiv": ["biorxiv preprint", "biorxiv.org", "cold spring harbor laboratory"],
     "medrxiv": ["medrxiv preprint", "medrxiv.org"],
@@ -89,6 +115,25 @@ JOURNAL_RSS_FEEDS = {
     "nature methods": ["https://www.nature.com/nmeth.rss"],
     "nature cancer": ["https://www.nature.com/natcancer.rss"],
     "nature aging": ["https://www.nature.com/nataging.rss"],
+    "nature machine intelligence": ["https://www.nature.com/natmachintell.rss"],
+    "nature computational science": ["https://www.nature.com/natcomputsci.rss"],
+    "npj aging": ["https://www.nature.com/npjaging.rss"],
+    "npj genomic medicine": ["https://www.nature.com/npjgenmed.rss"],
+    "scientific reports": ["https://www.nature.com/srep.rss"],
+    "science": ["https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science"],
+    "science advances": ["https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv"],
+    "science translational medicine": ["https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=stm"],
+    "cell": ["https://www.cell.com/cell/rss"],
+    "cancer cell": ["https://www.cell.com/cancer-cell/rss"],
+    "cell reports": ["https://www.cell.com/cell-reports/rss"],
+    "elife": ["https://elifesciences.org/rss/recent.xml"],
+    "pnas": ["https://www.pnas.org/action/showFeed?type=etoc&feed=rss&jc=pnas"],
+    "genome biology": ["https://genomebiology.biomedcentral.com/articles/most-recent/rss.xml"],
+    "alzheimer s dementia": ["https://alz-journals.onlinelibrary.wiley.com/feed/15525279/most-recent"],
+    "alzheimer s research therapy": ["https://alzres.biomedcentral.com/articles/most-recent/rss.xml"],
+    "aging cell": ["https://onlinelibrary.wiley.com/feed/14749726/most-recent"],
+    "ageing research reviews": ["https://rss.sciencedirect.com/publication/science/15681637"],
+    "cells": ["https://www.mdpi.com/rss/journal/cells"],
     "arxiv": [
         "https://rss.arxiv.org/rss/cs.AI",
         "https://rss.arxiv.org/rss/cs.LG",
@@ -479,7 +524,19 @@ def canonical_journal_name(raw: str) -> str:
     if not text:
         return ""
     for alias, canonical in _journal_alias_pairs():
-        if alias and re.search(rf"\b{re.escape(alias)}\b", text):
+        if not alias:
+            continue
+        # Only canonicalize if the alias IS the full text (not just a substring)
+        # e.g. "pnas" matches "pnas" but NOT "pnas nexus"
+        if text == alias:
+            return canonical
+        # Also allow match when alias is the text with extra qualifiers stripped
+        # e.g. "bioinformatics oxford england" → "bioinformatics"
+        if re.fullmatch(rf"{re.escape(alias)}(?:\s+.*)?", text) and canonical == alias:
+            # Only if the canonical itself equals the alias (self-mapping),
+            # return text as-is to avoid collapsing "pnas nexus" → "pnas"
+            return text
+        if re.fullmatch(rf"{re.escape(alias)}(?:\s+.*)?", text):
             return canonical
     return text
 
