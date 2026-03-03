@@ -5,7 +5,9 @@ import re
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any

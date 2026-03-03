@@ -1,7 +1,9 @@
 import argparse
 import json
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
+
+UTC = timezone.utc
 
 from app import (
     build_runtime_prefs_from_settings,
