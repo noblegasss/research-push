@@ -1682,7 +1682,19 @@ def _heuristic_score(p: Paper, prefs: dict[str, Any]) -> dict[str, int]:
     text = f"{p.title} {p.abstract}".lower()
     kw = prefs.get("keywords", [])
     fields = prefs.get("fields", [])
-    rel = min(100, (0 if not kw else round(60 * match_count(text, kw) / len(kw))) + (0 if not fields else round(20 * match_count(text, fields) / len(fields))) + (20 if prefs.get("journals") and venue_matches_selected((p.venue or ""), prefs["journals"], strict=bool(prefs.get("strict_journal_only", True))) else 10 if not prefs.get("journals") else 0) - (10 if not p.abstract else 0))
+    # Relevance breakdown (max 100):
+    #   keywords:  up to 45 pts (was 60)
+    #   fields:    up to 40 pts (was 20) — fields are equally important as keywords
+    #   journal:   up to 15 pts (was 20)
+    #   no-abstract penalty: -10
+    kw_score = 0 if not kw else round(45 * match_count(text, kw) / len(kw))
+    field_score = 0 if not fields else round(40 * match_count(text, fields) / len(fields))
+    journal_score = (15 if prefs.get("journals") and venue_matches_selected(
+        (p.venue or ""), prefs["journals"],
+        strict=bool(prefs.get("strict_journal_only", True))
+    ) else 5 if not prefs.get("journals") else 0)
+    abs_penalty = -10 if not p.abstract else 0
+    rel = min(100, max(0, kw_score + field_score + journal_score + abs_penalty))
     cues = ["novel", "new", "first", "we propose", "benchmark", "dataset", "state-of-the-art"]
     nov = min(100, 35 + min(40, 8 * sum(1 for c in cues if c in text)) + (10 if (parse_date(p.publication_date) and (now_utc() - parse_date(p.publication_date)).days <= 30) else 0) + (5 if p.venue.lower() == "arxiv" else 0))
     if not p.abstract:
@@ -3001,13 +3013,40 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
             filter_mode = "date_only_fallback"
     scored = [{"paper": p, "scores": score(p, prefs, use_ai=False)} for p in filtered]
     scored.sort(key=lambda x: x["scores"]["total"], reverse=True)
+
+    # ── Relevance gate: split into deep-read candidates vs also-notable ──
+    # Papers with low relevance or no topic hit go to also_notable, not deep reads.
+    MIN_RELEVANCE_FOR_DEEP_READ = 25
+    topic_terms = [t.lower() for t in (prefs.get("keywords", []) + prefs.get("fields", [])) if t]
+    deep_candidates = []
+    low_relevance_demoted = []
+    for item in scored:
+        rel_score = item["scores"].get("relevance", 0)
+        # Gate 1: minimum relevance score
+        if rel_score < MIN_RELEVANCE_FOR_DEEP_READ:
+            low_relevance_demoted.append(item)
+            continue
+        # Gate 2: when journals are selected, require at least one keyword/field hit
+        # in title or abstract to qualify for deep read
+        if prefs.get("journals") and topic_terms:
+            text = f"{item['paper'].title} {item['paper'].abstract}".lower()
+            if not any(t in text for t in topic_terms):
+                low_relevance_demoted.append(item)
+                continue
+        deep_candidates.append(item)
+
+    # If all papers were demoted (e.g. user has no keywords/fields), fall back
+    if not deep_candidates and scored:
+        deep_candidates = scored
+        low_relevance_demoted = []
+
     max_papers = int(prefs.get("max_papers", 0))
-    picked = scored if max_papers <= 0 else scored[:max_papers]
+    picked = deep_candidates if max_papers <= 0 else deep_candidates[:max_papers]
     # Journal diversity guard: when multiple journals are selected, avoid single-journal domination.
     selected_journals = normalize_str_list_input(prefs.get("journals", []))
-    if selected_journals and len(selected_journals) > 1 and scored:
+    if selected_journals and len(selected_journals) > 1 and deep_candidates:
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for item in scored:
+        for item in deep_candidates:
             p = item["paper"]
             assigned = None
             for j in selected_journals:
@@ -3025,7 +3064,7 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
                 balanced.append(bucket.pop(0))
         # second pass: fill remaining by global score order
         used_ids = {id(x["paper"]) for x in balanced}
-        for item in scored:
+        for item in deep_candidates:
             if id(item["paper"]) in used_ids:
                 continue
             balanced.append(item)
@@ -3044,6 +3083,8 @@ def build_digest(prefs: dict[str, Any], candidates: list[Paper]) -> dict[str, An
     n = len(picked)
     top_n = n if n <= 3 else 3 if n <= 5 else 5
     top, also = picked[:top_n], picked[top_n:]
+    # Append low-relevance demoted papers to also_notable
+    also = also + low_relevance_demoted
     selected = top + also
     vocab: dict[str, int] = {}
     preprint = 0
